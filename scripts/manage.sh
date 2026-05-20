@@ -7,7 +7,7 @@ if [[ $# -gt 0 ]]; then
 fi
 
 BIND_ADDRESS="0.0.0.0"
-PORT="5173"
+PORT="8888"
 FOLLOW="0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +35,7 @@ usage() {
 
 选项:
   --host <地址>     监听地址，默认 0.0.0.0，局域网可访问
-  --port <端口>     监听端口，默认 5173
+  --port <端口>     监听端口，默认 8888
   --follow          logs 命令持续跟随日志
   -h, --help        显示帮助
 

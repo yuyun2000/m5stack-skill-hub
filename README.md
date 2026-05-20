@@ -1,4 +1,4 @@
-﻿# M5Stack Skill 局域网共享站
+# M5Stack Skill 局域网共享站
 
 这是 M5Stack 内部使用的局域网 Skill 共享服务：同一个 Python 服务会托管网页，并提供上传、覆盖、删除、详情、评论、压缩包下载和服务端备份接口。默认不需要安装第三方依赖，只要本机有 Python 3 即可运行。
 
@@ -23,14 +23,14 @@ bash ./scripts/manage.sh start
 启动后复制脚本输出的局域网地址，例如：
 
 ```text
-http://192.168.20.69:5173
+http://192.168.20.69:8888
 ```
 
 同一局域网的同事打开这个地址即可使用。
 
 ## 一键管理脚本
 
-默认监听 `0.0.0.0:5173`，方便局域网访问。
+默认监听 `0.0.0.0:8888`，方便局域网访问。
 
 ### Windows
 
@@ -164,13 +164,13 @@ server/.data/
 如果不使用管理脚本，也可以手动启动：
 
 ```powershell
-python .\server\skill_share_server.py --host 0.0.0.0 --port 5173 --public-dir .\public --data-dir .\server\.data
+python .\server\skill_share_server.py --host 0.0.0.0 --port 8888 --public-dir .\public --data-dir .\server\.data
 ```
 
 Linux：
 
 ```bash
-python3 ./server/skill_share_server.py --host 0.0.0.0 --port 5173 --public-dir ./public --data-dir ./server/.data
+python3 ./server/skill_share_server.py --host 0.0.0.0 --port 8888 --public-dir ./public --data-dir ./server/.data
 ```
 
 ## API 说明

@@ -762,7 +762,7 @@ def main() -> int:
     project_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description="Serve the Skill Share frontend and API")
     parser.add_argument("--host", default="0.0.0.0", help="Bind address")
-    parser.add_argument("--port", type=int, default=5173, help="Bind port")
+    parser.add_argument("--port", type=int, default=8888, help="Bind port")
     parser.add_argument("--public-dir", default=str(project_root / "public"), help="Frontend public directory")
     parser.add_argument("--data-dir", default=str(project_root / "server" / ".data"), help="Persistent server data directory")
     args = parser.parse_args()

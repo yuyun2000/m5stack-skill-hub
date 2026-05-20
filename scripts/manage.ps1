@@ -1,11 +1,11 @@
-﻿param(
+param(
   [ValidateSet("start", "stop", "restart", "status", "open", "logs")]
   [string]$Action = "status",
 
   [string]$BindAddress = "0.0.0.0",
 
   [ValidateRange(1, 65535)]
-  [int]$Port = 5173,
+  [int]$Port = 8888,
 
   [switch]$Follow
 )
@@ -254,4 +254,3 @@ switch ($Action) {
   "open" { Open-Site }
   "logs" { Show-Logs }
 }
-
