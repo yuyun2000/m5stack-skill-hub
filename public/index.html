@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>M5Stack Skill Share</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <nav class="topbar" aria-label="页面导航">
+          <a class="brand" href="#top" aria-label="M5Stack Skill Share">
+            <span class="brand-mark">M5</span>
+            <span>
+              <strong>M5Stack Skill Share</strong>
+              <small>内部共享站</small>
+            </span>
+          </a>
+          <div class="server-chip" id="serverStatus" aria-live="polite">正在连接共享服务...</div>
+        </nav>
+
+        <section class="hero-grid compact-hero" id="top">
+          <div class="hero-copy">
+            <p class="eyebrow">M5Stack internal</p>
+            <h1>共享 Codex Skill，复用产品与工作流经验。</h1>
+            <p class="hero-lede">
+              上传、评论、下载都在局域网内完成。适合沉淀产品资料、技术支持、文档翻译和研发提效相关 Skill。
+            </p>
+          </div>
+
+          <aside class="quick-card compact-card" aria-label="平台要点">
+            <span class="card-label">平台要点</span>
+            <ol class="flow-list">
+              <li><strong>先看共享</strong><span>打开即可搜索已分享 Skill。</span></li>
+              <li><strong>评论补充</strong><span>补充说明用途和注意事项。</span></li>
+              <li><strong>下载 zip</strong><span>保留 <code>skill-name\SKILL.md</code> 目录结构。</span></li>
+            </ol>
+          </aside>
+        </section>
+      </header>
+
+      <main>
+        <section class="panel library-panel" aria-labelledby="libraryTitle">
+          <div class="section-heading library-heading">
+            <div>
+              <p class="eyebrow">共享区</p>
+              <h2 id="libraryTitle">已共享的 Skill</h2>
+            </div>
+            <div class="library-tools">
+              <label class="search-box">
+                <span>搜索</span>
+                <input id="searchInput" type="search" placeholder="名称、简介、功能..." autocomplete="off" />
+              </label>
+              <button class="small-button" id="refreshBtn" type="button">刷新</button>
+            </div>
+          </div>
+
+          <div class="skill-grid" id="sharedSkillGrid" aria-live="polite"></div>
+        </section>
+
+        <section class="panel upload-panel" aria-labelledby="uploadTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">分享 Skill</p>
+              <h2 id="uploadTitle">上传自己的 Skill</h2>
+            </div>
+            <div class="heading-actions">
+              <input id="defaultSkillsInput" type="file" webkitdirectory directory multiple hidden />
+              <input id="customFolderInput" type="file" webkitdirectory directory multiple hidden />
+              <button class="small-button" id="selectAllLocalBtn" type="button">全选</button>
+              <button class="small-button muted" id="clearLocalBtn" type="button">清空</button>
+            </div>
+          </div>
+
+          <div class="hint-strip">
+            <strong>本机目录：</strong>
+            选择 <code>C:\Users\你的用户名\.codex\skills</code>，页面会扫描其中包含 <code>SKILL.md</code> 的文件夹。
+          </div>
+
+          <div class="local-summary" id="localSummary">
+            <span>还没有索引本机 Skill。</span>
+            <button class="text-button" id="pickDefaultInlineBtn" type="button">选择默认目录</button>
+          </div>
+
+          <div class="local-grid" id="localSkillGrid" aria-live="polite"></div>
+
+          <div class="upload-footer">
+            <div>
+              <strong id="selectedCount">已选择 0 个 Skill</strong>
+              <p>同名上传会更新共享区版本，服务端保留历史备份。</p>
+            </div>
+            <button class="primary-action" id="uploadSelectedBtn" type="button" disabled>上传选中的 Skill</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+
+    <dialog class="skill-dialog" id="skillDialog" aria-labelledby="dialogTitle">
+      <div class="dialog-card">
+        <button class="dialog-close" id="closeDialogBtn" type="button" aria-label="关闭详情">×</button>
+        <div class="dialog-layout">
+          <aside class="dialog-side">
+            <span class="card-label">Skill 详情</span>
+            <h2 id="dialogTitle">Skill 名称</h2>
+            <p id="dialogDescription"></p>
+            <dl class="meta-list">
+              <div>
+                <dt>版本</dt>
+                <dd id="dialogVersion">-</dd>
+              </div>
+              <div>
+                <dt>文件数</dt>
+                <dd id="dialogFileCount">-</dd>
+              </div>
+              <div>
+                <dt>更新时间</dt>
+                <dd id="dialogUpdated">-</dd>
+              </div>
+            </dl>
+            <div class="dialog-actions">
+              <button class="primary-action" id="downloadZipBtn" type="button">下载 Skill 压缩包</button>
+              <button class="danger-action" id="deleteSkillBtn" type="button">从共享区删除</button>
+            </div>
+            <p class="install-help">
+              下载后先解压，再把整个 Skill 文件夹放进 <code>C:\Users\你的用户名\.codex\skills</code>。
+            </p>
+            <div class="install-guide" aria-label="安装目录结构说明">
+              <strong>正确安装结构</strong>
+              <code id="installPathExample">C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md</code>
+              <pre id="installTree">.codex\skills\
+  skill-name\
+    SKILL.md
+    ...其他文件</pre>
+              <p>不要把 <code>SKILL.md</code> 直接放到 <code>.codex\skills</code> 根目录。</p>
+            </div>
+          </aside>
+          <div class="detail-main">
+            <section class="comments-panel comments-spotlight" aria-labelledby="commentsTitle">
+              <div class="comments-head">
+                <div>
+                  <p class="eyebrow">同事补充</p>
+                  <h3 id="commentsTitle">评论 <span id="commentCount">0</span></h3>
+                </div>
+                <p>写清楚这个 Skill 能做什么、适合谁用、有什么注意事项。</p>
+              </div>
+              <div class="comments-list" id="commentsList"></div>
+              <form class="comment-form" id="commentForm">
+                <label>
+                  <span>署名</span>
+                  <input id="commentAuthor" name="author" maxlength="40" placeholder="例如：M5Stack Docs Team" autocomplete="name" />
+                </label>
+                <label>
+                  <span>评论</span>
+                  <textarea id="commentBody" name="body" maxlength="1200" rows="4" placeholder="例如：适合查询 M5Stack 产品规格、整理售后回复模板。" required></textarea>
+                </label>
+                <button class="primary-action" type="submit">发布评论</button>
+              </form>
+            </section>
+
+            <article class="markdown-preview" id="dialogMarkdown" tabindex="0"></article>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <template id="localSkillTemplate">
+      <article class="local-card">
+        <label class="select-line">
+          <input type="checkbox" />
+          <span class="fake-check"></span>
+          <span class="local-name"></span>
+        </label>
+        <p class="local-desc"></p>
+        <div class="tag-row"></div>
+      </article>
+    </template>
+
+    <template id="sharedSkillTemplate">
+      <article class="skill-card">
+        <div class="skill-card-head">
+          <span class="skill-initial"></span>
+          <button class="icon-button delete-card-btn" type="button" aria-label="删除 Skill">删除</button>
+        </div>
+        <h3></h3>
+        <p></p>
+        <div class="tag-row"></div>
+        <div class="skill-card-foot">
+          <span class="updated-text"></span>
+          <span class="comment-badge"></span>
+          <button class="small-button view-btn" type="button">查看 / 下载</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
