@@ -53,7 +53,7 @@ function Resolve-Python {
     }
   }
 
-  throw "未找到 Python。请先安装 Python 3，并确认 python 或 py 命令可用。"
+  throw "Python was not found. Install Python 3 and make sure python or py is available."
 }
 
 function Get-Config {
@@ -106,7 +106,7 @@ function Get-LanUrls {
 function Show-Urls {
   param([int]$UrlPort)
 
-  Write-Host "访问地址："
+  Write-Host "URLs:"
   foreach ($url in (Get-LanUrls -UrlPort $UrlPort)) {
     Write-Host "  $url"
   }
@@ -117,17 +117,17 @@ function Start-Server {
   if ($existing) {
     $config = Get-Config
     $runningPort = if ($config -and $config.port) { [int]$config.port } else { $Port }
-    Write-Host "服务已经在运行，PID: $($existing.Id)"
+    Write-Host "Service is already running, PID: $($existing.Id)"
     Show-Urls -UrlPort $runningPort
     return
   }
 
   Ensure-RuntimeDir
   if (-not (Test-Path $WebRoot)) {
-    throw "未找到网页目录：$WebRoot"
+    throw "Public directory not found: $WebRoot"
   }
   if (-not (Test-Path $ServerScript)) {
-    throw "未找到共享服务脚本：$ServerScript"
+    throw "Server script not found: $ServerScript"
   }
 
   $python = Resolve-Python
@@ -136,10 +136,10 @@ function Start-Server {
   $args += @($ServerScript, "--host", $BindAddress, "--port", [string]$Port, "--public-dir", $WebRoot, "--data-dir", $DataDir)
   $argumentString = ($args | ForEach-Object { Quote-Arg $_ }) -join " "
 
-  Write-Host "正在启动 Skill 共享站..."
-  Write-Host "项目目录：$ProjectRoot"
-  Write-Host "网页目录：$WebRoot"
-  Write-Host "数据目录：$DataDir"
+  Write-Host "Starting Skill Share service..."
+  Write-Host "Project directory: $ProjectRoot"
+  Write-Host "Public directory: $WebRoot"
+  Write-Host "Data directory: $DataDir"
 
   $process = Start-Process `
     -FilePath $python.FilePath `
@@ -168,31 +168,31 @@ function Start-Server {
   Start-Sleep -Milliseconds 900
   $running = Get-ServerProcess
   if (-not $running) {
-    throw "服务启动失败。请查看日志：$OutLogFile 或 $ErrLogFile"
+    throw "Service failed to start. Check logs: $OutLogFile or $ErrLogFile"
   }
 
-  Write-Host "启动成功，PID: $($process.Id)"
+  Write-Host "Started, PID: $($process.Id)"
   Show-Urls -UrlPort $Port
 }
 
 function Stop-Server {
   $process = Get-ServerProcess
   if (-not $process) {
-    Write-Host "服务没有运行。"
+    Write-Host "Service is not running."
     if (Test-Path $PidFile) {
       Remove-Item -Path $PidFile -Force
     }
     return
   }
 
-  Write-Host "正在停止服务，PID: $($process.Id)..."
+  Write-Host "Stopping service, PID: $($process.Id)..."
   Stop-Process -Id $process.Id -Force
   Start-Sleep -Milliseconds 300
 
   if (Test-Path $PidFile) {
     Remove-Item -Path $PidFile -Force
   }
-  Write-Host "已停止。服务端备份文件不受影响。"
+  Write-Host "Stopped. Server backups are not affected."
 }
 
 function Show-Status {
@@ -201,34 +201,34 @@ function Show-Status {
   $runningPort = if ($config -and $config.port) { [int]$config.port } else { $Port }
 
   if ($process) {
-    Write-Host "状态：运行中"
-    Write-Host "PID：$($process.Id)"
+    Write-Host "Status: running"
+    Write-Host "PID: $($process.Id)"
     if ($config -and $config.startedAt) {
-      Write-Host "启动时间：$($config.startedAt)"
+      Write-Host "Started at: $($config.startedAt)"
     }
     Show-Urls -UrlPort $runningPort
   } else {
-    Write-Host "状态：未运行"
+    Write-Host "Status: stopped"
   }
 
-  Write-Host "运行目录：$ProjectRoot"
-  Write-Host "网页目录：$WebRoot"
-  Write-Host "数据目录：$DataDir"
-  Write-Host "日志目录：$RuntimeDir"
+  Write-Host "Project directory: $ProjectRoot"
+  Write-Host "Public directory: $WebRoot"
+  Write-Host "Data directory: $DataDir"
+  Write-Host "Log directory: $RuntimeDir"
 }
 
 function Open-Site {
   $config = Get-Config
   $runningPort = if ($config -and $config.port) { [int]$config.port } else { $Port }
   $url = "http://127.0.0.1:$runningPort"
-  Write-Host "打开：$url"
+  Write-Host "Opening: $url"
   Start-Process $url
 }
 
 function Show-Logs {
   Ensure-RuntimeDir
-  Write-Host "标准输出日志：$OutLogFile"
-  Write-Host "错误日志：$ErrLogFile"
+  Write-Host "Stdout log: $OutLogFile"
+  Write-Host "Stderr log: $ErrLogFile"
 
   foreach ($file in @($OutLogFile, $ErrLogFile)) {
     if (-not (Test-Path $file)) {
