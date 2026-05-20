@@ -652,6 +652,50 @@ main {
   line-height: 1.1;
 }
 
+.skill-card > p {
+  display: -webkit-box;
+  min-height: 3.2em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.skill-card .tag-row {
+  display: none;
+}
+
+.featured-comment {
+  margin-top: 14px;
+  border: 1px solid rgba(49, 83, 59, 0.16);
+  border-radius: 18px;
+  padding: 13px 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 181, 69, 0.22), rgba(255, 250, 240, 0.72)),
+    repeating-linear-gradient(90deg, rgba(49, 83, 59, 0.04) 0 1px, transparent 1px 22px);
+}
+
+.featured-comment span {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.24rem 0.48rem;
+  color: var(--paper-bright);
+  background: var(--moss);
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.featured-comment blockquote {
+  margin: 10px 0 8px;
+  color: var(--ink);
+  font-weight: 900;
+  line-height: 1.55;
+}
+
+.featured-comment small {
+  color: var(--ink-soft);
+  font-weight: 800;
+}
+
 .skill-card-foot {
   flex-wrap: wrap;
   margin-top: auto;
@@ -659,8 +703,12 @@ main {
 }
 
 .updated-text {
-  color: var(--ink-soft);
+  border-radius: 999px;
+  padding: 0.36rem 0.62rem;
+  color: #244a32;
+  background: rgba(148, 201, 192, 0.32);
   font-size: 0.86rem;
+  font-weight: 900;
 }
 
 .comment-badge {
@@ -967,6 +1015,67 @@ main {
   resize: vertical;
 }
 
+.updates-panel {
+  border-bottom: 1px solid rgba(49, 83, 59, 0.14);
+  padding: 26px 42px 30px;
+  background: rgba(255, 250, 240, 0.9);
+}
+
+.updates-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.updates-head h3 {
+  margin: 0;
+  font-size: 1.45rem;
+  letter-spacing: -0.04em;
+}
+
+.updates-list {
+  display: grid;
+  gap: 10px;
+}
+
+.update-item {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  border: 1px solid rgba(29, 36, 31, 0.1);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 250, 240, 0.72);
+}
+
+.update-item time {
+  color: var(--moss);
+  font-weight: 900;
+  font-size: 0.86rem;
+}
+
+.update-item div {
+  display: grid;
+  gap: 3px;
+}
+
+.update-item strong {
+  color: var(--ink);
+}
+
+.update-item span {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.compact-empty {
+  padding: 16px;
+  text-align: left;
+}
+
 .toast-region {
   position: fixed;
   z-index: 10;
@@ -1026,8 +1135,13 @@ main {
   }
 
   .markdown-preview,
-  .comments-panel {
+  .comments-panel,
+  .updates-panel {
     padding: 28px;
+  }
+
+  .update-item {
+    grid-template-columns: 1fr;
   }
 }
 

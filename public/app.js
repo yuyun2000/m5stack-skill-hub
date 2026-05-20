@@ -35,6 +35,7 @@ const els = {
   commentForm: document.querySelector("#commentForm"),
   commentAuthor: document.querySelector("#commentAuthor"),
   commentBody: document.querySelector("#commentBody"),
+  updatesList: document.querySelector("#updatesList"),
 };
 
 const state = {
@@ -337,6 +338,15 @@ function toLocalSharedSkill(skill) {
     fileCount: skill.fileCount,
     commentCount: 0,
     comments: [],
+    featuredComment: null,
+    latestUpdate: {
+      action: "created",
+      label: "本次上传",
+      at: new Date().toISOString(),
+      version: skill.version || "",
+      fileCount: skill.fileCount || 0,
+    },
+    updateHistory: [],
     files: skill.files,
     localOnly: true,
   };
@@ -358,6 +368,7 @@ function renderSharedSkills() {
     const haystack = [
       skill.name,
       skill.description,
+      skill.featuredComment?.body,
       skill.version,
       ...(skill.tags || []),
     ].join(" ").toLowerCase();
@@ -380,14 +391,10 @@ function renderSharedSkills() {
     const node = els.sharedSkillTemplate.content.firstElementChild.cloneNode(true);
     node.querySelector(".skill-initial").textContent = skill.name.slice(0, 1) || "S";
     node.querySelector("h3").textContent = skill.name;
-    node.querySelector("p").textContent = skill.description || "暂无简介。";
-    node.querySelector(".updated-text").textContent = formatDate(skill.updatedAt);
+    node.querySelector("p").textContent = truncate(skill.description || "暂无简介。", 58);
+    node.querySelector(".updated-text").textContent = `最近更新 ${formatDate(skill.latestUpdate?.at || skill.updatedAt)}`;
     node.querySelector(".comment-badge").textContent = `${skill.commentCount || 0} 条评论`;
-    renderTags(node.querySelector(".tag-row"), [
-      skill.localOnly ? "临时预览" : "共享",
-      skill.version ? `v${skill.version}` : null,
-      ...(skill.tags || []),
-    ]);
+    renderFeaturedComment(node, skill.featuredComment);
 
     node.querySelector(".view-btn").addEventListener("click", () => openSkillDialog(skill));
     node.querySelector(".delete-card-btn").addEventListener("click", () => deleteSharedSkill(skill));
@@ -407,6 +414,7 @@ async function openSkillDialog(skill) {
   els.dialogMarkdown.innerHTML = renderMarkdown(detailedSkill.markdown || "# 暂无 SKILL.md 内容\n\n共享服务未返回 Markdown 内容。");
   updateInstallGuide(detailedSkill);
   renderComments(detailedSkill.comments || []);
+  renderUpdateHistory(detailedSkill.updateHistory || fallbackUpdateHistory(detailedSkill));
 
   if (typeof els.dialog.showModal === "function") {
     els.dialog.showModal();
@@ -458,6 +466,72 @@ function renderComments(comments) {
   }
 }
 
+function renderFeaturedComment(card, comment) {
+  const panel = card.querySelector(".featured-comment");
+  if (!panel || !comment?.body) {
+    if (panel) panel.hidden = true;
+    return;
+  }
+
+  panel.hidden = false;
+  panel.querySelector("blockquote").textContent = truncate(comment.body, 118);
+  panel.querySelector("small").textContent = `${comment.author || "M5Stack 同事"} · ${formatDate(comment.createdAt)}`;
+}
+
+function renderUpdateHistory(history) {
+  const normalized = Array.isArray(history) ? [...history].reverse().slice(0, 8) : [];
+  els.updatesList.replaceChildren();
+
+  if (!normalized.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state compact-empty";
+    empty.textContent = "暂无更新记录。";
+    els.updatesList.append(empty);
+    return;
+  }
+
+  for (const item of normalized) {
+    const row = document.createElement("article");
+    row.className = "update-item";
+    const meta = [
+      item.version ? `v${item.version}` : "",
+      item.fileCount ? `${item.fileCount} 个文件` : "",
+    ].filter(Boolean).join(" · ");
+    row.innerHTML = `
+      <time>${escapeHtml(formatDate(item.at))}</time>
+      <div>
+        <strong>${escapeHtml(item.label || (item.action === "created" ? "创建共享版本" : "更新共享版本"))}</strong>
+        ${meta ? `<span>${escapeHtml(meta)}</span>` : ""}
+      </div>
+    `;
+    els.updatesList.append(row);
+  }
+}
+
+function fallbackUpdateHistory(skill) {
+  if (!skill?.updatedAt) return [];
+  return [{
+    id: "current",
+    action: "updated",
+    label: "当前共享版本",
+    at: skill.updatedAt,
+    version: skill.version || "",
+    fileCount: skill.fileCount || 0,
+  }];
+}
+
+function pickFeaturedComment(comments) {
+  const normalized = Array.isArray(comments) ? comments.filter((comment) => comment?.body) : [];
+  if (!normalized.length) return null;
+  return normalized.reduce((best, comment) => {
+    if (!best) return comment;
+    const score = String(comment.body || "").length;
+    const bestScore = String(best.body || "").length;
+    if (score !== bestScore) return score > bestScore ? comment : best;
+    return String(comment.createdAt || "") > String(best.createdAt || "") ? comment : best;
+  }, null);
+}
+
 async function submitComment(event) {
   event.preventDefault();
   const skill = state.activeSkill;
@@ -492,6 +566,7 @@ async function submitComment(event) {
       ...state.activeSkill,
       comments,
       commentCount: payload.commentCount ?? comments.length,
+      featuredComment: pickFeaturedComment(comments),
     };
     localStorage.setItem("skillShareCommentAuthor", author);
     els.commentBody.value = "";
@@ -510,7 +585,7 @@ async function submitComment(event) {
 function updateSharedSkillCommentCount(skillId, count) {
   state.sharedSkills = state.sharedSkills.map((skill) => {
     if ((skill.id || skill.name) !== skillId && skill.name !== skillId) return skill;
-    return { ...skill, commentCount: count };
+    return { ...skill, commentCount: count, featuredComment: state.activeSkill?.featuredComment || skill.featuredComment };
   });
   renderSharedSkills();
 }
@@ -737,6 +812,10 @@ function normalizeSharedSkill(skill) {
     fileCount: skill.fileCount || skill.file_count || metadata.fileCount || 0,
     commentCount: skill.commentCount || skill.comment_count || metadata.commentCount || 0,
     comments: Array.isArray(skill.comments) ? skill.comments : [],
+    featuredComment: skill.featuredComment || skill.featured_comment || metadata.featuredComment || null,
+    latestUpdate: skill.latestUpdate || skill.latest_update || metadata.latestUpdate || null,
+    updateCount: skill.updateCount || skill.update_count || metadata.updateCount || 0,
+    updateHistory: Array.isArray(skill.updateHistory) ? skill.updateHistory : [],
     downloadUrl: skill.downloadUrl || skill.download_url || "",
     localOnly: Boolean(skill.localOnly),
     files: skill.files,

@@ -23,14 +23,14 @@ bash ./scripts/manage.sh start
 启动后复制脚本输出的局域网地址，例如：
 
 ```text
-http://192.168.20.69:8888
+http://192.168.20.69:1885
 ```
 
 同一局域网的同事打开这个地址即可使用。
 
 ## 一键管理脚本
 
-默认监听 `0.0.0.0:8888`，方便局域网访问。
+默认监听 `0.0.0.0:1885`，方便局域网访问。
 
 ### Windows
 
@@ -149,7 +149,7 @@ C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md
 
 ```text
 server/.data/
-  skills/      # 当前共享区版本，每个 Skill 包含文件、metadata.json、comments.json
+  skills/      # 当前共享区版本，每个 Skill 包含文件、metadata.json、comments.json、history.json
   backups/     # 覆盖和删除前的 zip 备份
   tmp/         # 临时文件
 ```
@@ -157,6 +157,7 @@ server/.data/
 - 上传同名 Skill：先把旧版本备份到 `server/.data/backups/`，再更新共享区版本。
 - 删除 Skill：先把当前版本备份到 `server/.data/backups/`，再从共享列表移除。
 - 评论会保存在对应 Skill 的 `comments.json` 里；同名覆盖时会保留已有评论。
+- 更新记录会保存在对应 Skill 的 `history.json` 里；同名覆盖时会追加一条更新历史。
 - `server/.data/` 已加入 `.gitignore`，不会误提交共享数据。
 
 ## 手动启动服务
@@ -164,13 +165,13 @@ server/.data/
 如果不使用管理脚本，也可以手动启动：
 
 ```powershell
-python .\server\skill_share_server.py --host 0.0.0.0 --port 8888 --public-dir .\public --data-dir .\server\.data
+python .\server\skill_share_server.py --host 0.0.0.0 --port 1885 --public-dir .\public --data-dir .\server\.data
 ```
 
 Linux：
 
 ```bash
-python3 ./server/skill_share_server.py --host 0.0.0.0 --port 8888 --public-dir ./public --data-dir ./server/.data
+python3 ./server/skill_share_server.py --host 0.0.0.0 --port 1885 --public-dir ./public --data-dir ./server/.data
 ```
 
 ## API 说明
@@ -203,6 +204,12 @@ GET /api/skills
       "updatedAt": "2026-05-20T08:00:00Z",
       "fileCount": 8,
       "commentCount": 2,
+      "updateCount": 3,
+      "latestUpdate": {
+        "action": "updated",
+        "at": "2026-05-20T08:00:00Z",
+        "version": "1.0.0"
+      },
       "downloadUrl": "/api/skills/frontend-design/download"
     }
   ]
@@ -230,7 +237,7 @@ Content-Type: multipart/form-data
 GET /api/skills/:id
 ```
 
-返回单个 Skill，包含 `markdown` 和 `comments` 字段，用于详情预览和评论展示。
+返回单个 Skill，包含 `markdown`、`comments` 和 `updateHistory` 字段，用于详情预览、评论展示和更新历史展示。
 
 ### 获取评论
 

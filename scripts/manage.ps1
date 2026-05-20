@@ -5,7 +5,7 @@ param(
   [string]$BindAddress = "0.0.0.0",
 
   [ValidateRange(1, 65535)]
-  [int]$Port = 8888,
+  [int]$Port = 1885,
 
   [switch]$Follow
 )

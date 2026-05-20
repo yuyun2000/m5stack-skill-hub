@@ -222,6 +222,8 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         files_dir = tmp_dir / "files"
         files_dir.mkdir(parents=True, exist_ok=True)
         existing_comments = read_comments(skill_dir) if skill_dir.exists() else []
+        existing_metadata = read_json(skill_dir / "metadata.json") if skill_dir.exists() else None
+        existing_history = read_update_history(skill_dir, existing_metadata) if skill_dir.exists() else []
 
         for relative_path, content, _content_type in resolved_files:
             target = files_dir / Path(*PurePosixPath(relative_path).parts)
@@ -235,6 +237,18 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         )
         tags = normalize_tags(metadata.get("tags") or parsed.get("tags") or [])
         version = clean_scalar(metadata.get("version") or parsed.get("version"))
+        action = "updated" if skill_dir.exists() else "created"
+        update_history = existing_history + [
+            {
+                "id": uuid.uuid4().hex,
+                "action": action,
+                "label": "Updated shared version" if action == "updated" else "Created shared version",
+                "at": now,
+                "version": version,
+                "fileCount": len(resolved_files),
+                "size": total_size,
+            }
+        ]
 
         saved_metadata = {
             "id": slug,
@@ -249,6 +263,7 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             "size": total_size,
             "commentCount": len(existing_comments),
             "comments": existing_comments,
+            "updateHistory": update_history,
             "downloadUrl": f"/api/skills/{quote(slug)}/download",
         }
 
@@ -257,6 +272,7 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             encoding="utf-8",
         )
         write_comments(tmp_dir, existing_comments)
+        write_update_history(tmp_dir, update_history)
 
         self.backup_skill(slug, "overwrite")
         if skill_dir.exists():
@@ -390,7 +406,12 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             if not metadata:
                 continue
             normalized = normalize_metadata(metadata)
-            normalized["commentCount"] = len(read_comments(metadata_path.parent))
+            comments = read_comments(metadata_path.parent)
+            update_history = read_update_history(metadata_path.parent, metadata)
+            normalized["commentCount"] = len(comments)
+            normalized["featuredComment"] = select_featured_comment(comments)
+            normalized["updateCount"] = len(update_history)
+            normalized["latestUpdate"] = update_history[-1] if update_history else None
             if not include_markdown:
                 normalized.pop("markdown", None)
             skills.append(normalized)
@@ -405,13 +426,18 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             return None
         normalized = normalize_metadata(metadata)
         comments = read_comments(skill_dir)
+        update_history = read_update_history(skill_dir, metadata)
         normalized["commentCount"] = len(comments)
+        normalized["featuredComment"] = select_featured_comment(comments)
+        normalized["updateCount"] = len(update_history)
+        normalized["latestUpdate"] = update_history[-1] if update_history else None
         if include_markdown and not normalized.get("markdown"):
             skill_md = skill_dir / "files" / "SKILL.md"
             if skill_md.exists():
                 normalized["markdown"] = skill_md.read_text(encoding="utf-8", errors="replace")
         if include_markdown:
             normalized["comments"] = comments
+            normalized["updateHistory"] = update_history
         if not include_markdown:
             normalized.pop("markdown", None)
         return normalized
@@ -672,6 +698,9 @@ def create_skill_zip(skill_dir: Path, zip_path: Path) -> None:
         comments_path = skill_dir / "comments.json"
         if comments_path.exists():
             archive.write(comments_path, f"{top_folder}/comments.json")
+        history_path = skill_dir / "history.json"
+        if history_path.exists():
+            archive.write(history_path, f"{top_folder}/history.json")
         for path in sorted(files_dir.rglob("*")):
             if path.is_file():
                 archive.write(path, f"{top_folder}/{path.relative_to(files_dir).as_posix()}")
@@ -719,6 +748,70 @@ def write_comments(skill_dir: Path, comments: list[dict[str, Any]]) -> None:
     )
 
 
+def read_update_history(skill_dir: Path, metadata: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    path = skill_dir / "history.json"
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raw = []
+
+    history: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            at = clean_scalar(item.get("at") or item.get("updatedAt"))
+            if not at:
+                continue
+            action = clean_scalar(item.get("action")) or "updated"
+            history.append(
+                {
+                    "id": clean_scalar(item.get("id")) or uuid.uuid4().hex,
+                    "action": action,
+                    "label": clean_scalar(item.get("label")) or ("Created shared version" if action == "created" else "Updated shared version"),
+                    "at": at,
+                    "version": clean_scalar(item.get("version")),
+                    "fileCount": int(item.get("fileCount") or 0),
+                    "size": int(item.get("size") or 0),
+                }
+            )
+
+    if not history and metadata:
+        at = clean_scalar(metadata.get("updatedAt")) or iso_now()
+        history.append(
+            {
+                "id": uuid.uuid4().hex,
+                "action": "updated",
+                "label": "Current shared version",
+                "at": at,
+                "version": clean_scalar(metadata.get("version")),
+                "fileCount": int(metadata.get("fileCount") or 0),
+                "size": int(metadata.get("size") or 0),
+            }
+        )
+
+    return sorted(history, key=lambda item: item.get("at", ""))
+
+
+def write_update_history(skill_dir: Path, history: list[dict[str, Any]]) -> None:
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "history.json").write_text(
+        json.dumps(history, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def select_featured_comment(comments: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not comments:
+        return None
+
+    # Longer comments usually contain the clearest human-readable capability summary.
+    return max(
+        comments,
+        key=lambda item: (len(clean_scalar(item.get("body"))), clean_scalar(item.get("createdAt"))),
+    )
+
+
 def clean_scalar(value: Any) -> str:
     if value is None:
         return ""
@@ -762,7 +855,7 @@ def main() -> int:
     project_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description="Serve the Skill Share frontend and API")
     parser.add_argument("--host", default="0.0.0.0", help="Bind address")
-    parser.add_argument("--port", type=int, default=8888, help="Bind port")
+    parser.add_argument("--port", type=int, default=1885, help="Bind port")
     parser.add_argument("--public-dir", default=str(project_root / "public"), help="Frontend public directory")
     parser.add_argument("--data-dir", default=str(project_root / "server" / ".data"), help="Persistent server data directory")
     args = parser.parse_args()
