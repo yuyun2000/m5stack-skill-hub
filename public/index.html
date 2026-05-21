@@ -41,6 +41,26 @@
       </header>
 
       <main>
+        <section class="install-home-panel" aria-labelledby="installHomeTitle">
+          <div class="install-home-copy">
+            <p class="eyebrow">安装方法</p>
+            <h2 id="installHomeTitle">下载后，把整个 Skill 文件夹放到 Codex skills 目录。</h2>
+            <p>
+              这是最容易出错的一步，所以固定在首页：下载 zip 后先解压，保留
+              <code>skill-name\SKILL.md</code> 这一层目录结构。
+            </p>
+          </div>
+          <ol class="install-steps" aria-label="安装步骤">
+            <li><strong>下载 zip</strong><span>在 Skill 详情窗口点击下载压缩包。</span></li>
+            <li><strong>先解压</strong><span>不要只复制里面的单个 <code>SKILL.md</code>。</span></li>
+            <li><strong>整包放入</strong><span>复制整个 <code>skill-name</code> 文件夹到 skills 目录。</span></li>
+          </ol>
+          <div class="install-path-card" aria-label="正确安装目录示例">
+            <span>正确结构</span>
+            <code>C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md</code>
+          </div>
+        </section>
+
         <section class="panel library-panel" aria-labelledby="libraryTitle">
           <div class="section-heading library-heading">
             <div>
@@ -124,19 +144,22 @@
               <button class="primary-action" id="downloadZipBtn" type="button">下载 Skill 压缩包</button>
               <button class="danger-action" id="deleteSkillBtn" type="button">从共享区删除</button>
             </div>
-            <p class="install-help">
-              下载后先解压，再把整个 Skill 文件夹放进 <code>C:\Users\你的用户名\.codex\skills</code>。
-            </p>
-            <div class="install-guide" aria-label="安装目录结构说明">
+          </aside>
+          <section class="dialog-install-panel" aria-label="安装目录结构说明">
+            <div>
+              <p class="eyebrow">下载后怎么安装</p>
+              <h3>先解压，再把整个 Skill 文件夹放进 skills 目录。</h3>
+              <p>不要把 <code>SKILL.md</code> 直接放到 <code>.codex\skills</code> 根目录。</p>
+            </div>
+            <div class="install-guide">
               <strong>正确安装结构</strong>
               <code id="installPathExample">C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md</code>
               <pre id="installTree">.codex\skills\
   skill-name\
     SKILL.md
     ...其他文件</pre>
-              <p>不要把 <code>SKILL.md</code> 直接放到 <code>.codex\skills</code> 根目录。</p>
             </div>
-          </aside>
+          </section>
           <div class="detail-main">
             <section class="comments-panel comments-spotlight" aria-labelledby="commentsTitle">
               <div class="comments-head">

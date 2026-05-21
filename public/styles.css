@@ -392,6 +392,136 @@ main {
   margin-top: 28px;
 }
 
+.install-home-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr) minmax(240px, 0.72fr);
+  gap: 18px;
+  align-items: stretch;
+  border: 1px solid rgba(49, 83, 59, 0.2);
+  border-radius: var(--radius-lg);
+  padding: clamp(22px, 3vw, 30px);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 181, 69, 0.34), transparent 15rem),
+    linear-gradient(135deg, rgba(255, 250, 240, 0.95), rgba(230, 239, 221, 0.9));
+  box-shadow: 0 24px 52px rgba(29, 36, 31, 0.12);
+}
+
+.install-home-panel::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  pointer-events: none;
+  border: 1px dashed rgba(49, 83, 59, 0.18);
+  border-radius: calc(var(--radius-lg) - 10px);
+}
+
+.install-home-copy,
+.install-steps,
+.install-path-card {
+  position: relative;
+  z-index: 1;
+}
+
+.install-home-copy h2 {
+  max-width: 720px;
+  margin-bottom: 12px;
+  font-size: clamp(1.65rem, 3.1vw, 2.75rem);
+  line-height: 1.04;
+  letter-spacing: -0.05em;
+}
+
+.install-home-copy p {
+  max-width: 720px;
+  margin-bottom: 0;
+  color: var(--ink-soft);
+  line-height: 1.75;
+}
+
+.install-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: install-step;
+}
+
+.install-steps li {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid rgba(49, 83, 59, 0.13);
+  border-radius: 18px;
+  padding: 12px;
+  background: rgba(255, 250, 240, 0.72);
+  counter-increment: install-step;
+}
+
+.install-steps li::before {
+  content: counter(install-step);
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 13px;
+  color: var(--paper-bright);
+  background: var(--moss);
+  font-weight: 900;
+}
+
+.install-steps strong,
+.install-steps span {
+  grid-column: 2;
+  display: block;
+}
+
+.install-steps strong {
+  grid-row: 1;
+  margin-top: 1px;
+  font-weight: 900;
+}
+
+.install-steps span {
+  grid-row: 2;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+
+.install-path-card {
+  display: grid;
+  align-content: center;
+  gap: 12px;
+  border-radius: 24px;
+  padding: 18px;
+  color: var(--paper-bright);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(255, 181, 69, 0.5), transparent 9rem),
+    linear-gradient(160deg, #273d2d, var(--moss));
+}
+
+.install-path-card span {
+  width: max-content;
+  border-radius: 999px;
+  padding: 0.36rem 0.62rem;
+  color: var(--ink);
+  background: var(--citrus);
+  font-weight: 900;
+  font-size: 0.8rem;
+}
+
+.install-path-card code {
+  display: block;
+  overflow-wrap: anywhere;
+  border-color: rgba(255, 250, 240, 0.24);
+  color: #173826;
+  background: rgba(255, 250, 240, 0.92);
+  line-height: 1.65;
+}
+
 .panel {
   padding: clamp(22px, 4vw, 36px);
 }
@@ -769,11 +899,19 @@ main {
 
 .dialog-layout {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 330px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 640px;
+  max-height: min(820px, calc(100vh - 28px));
 }
 
 .dialog-side {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
   padding: 30px;
   color: var(--paper-bright);
   background:
@@ -822,10 +960,40 @@ main {
   font-size: 0.9rem;
 }
 
+.dialog-install-panel {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: start;
+  border-bottom: 1px solid rgba(49, 83, 59, 0.16);
+  padding: 28px 42px;
+  color: var(--paper-bright);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(255, 181, 69, 0.34), transparent 14rem),
+    linear-gradient(145deg, #294233, var(--moss));
+  box-shadow: 0 16px 30px rgba(29, 36, 31, 0.12);
+}
+
+.dialog-install-panel h3 {
+  margin: 0 0 10px;
+  font-size: clamp(1.35rem, 2.4vw, 2rem);
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+}
+
+.dialog-install-panel p {
+  margin: 0;
+  color: rgba(255, 250, 240, 0.78);
+  line-height: 1.7;
+}
+
 .install-guide {
   display: grid;
   gap: 10px;
-  margin-top: 16px;
   border: 1px solid rgba(255, 250, 240, 0.16);
   border-radius: 18px;
   padding: 14px;
@@ -840,6 +1008,7 @@ main {
   display: block;
   overflow-wrap: anywhere;
   color: #173826;
+  background: rgba(255, 250, 240, 0.9);
 }
 
 .install-guide pre {
@@ -861,8 +1030,10 @@ main {
 }
 
 .detail-main {
+  grid-column: 2;
+  grid-row: 2;
   overflow: auto;
-  max-height: min(820px, calc(100vh - 28px));
+  min-height: 0;
   background: rgba(255, 250, 240, 0.92);
 }
 
@@ -1114,8 +1285,20 @@ main {
 
 @media (max-width: 900px) {
   .hero-grid,
-  .dialog-layout {
+  .dialog-layout,
+  .install-home-panel,
+  .dialog-install-panel {
     grid-template-columns: 1fr;
+  }
+
+  .dialog-layout {
+    grid-template-areas:
+      "install"
+      "side"
+      "detail";
+    grid-template-rows: auto;
+    min-height: 0;
+    max-height: none;
   }
 
   .quick-card {
@@ -1127,13 +1310,22 @@ main {
   }
 
   .dialog-side {
+    grid-area: side;
     padding-right: 72px;
-  }
-
-  .detail-main {
     max-height: none;
   }
 
+  .detail-main {
+    grid-area: detail;
+    overflow: visible;
+    max-height: none;
+  }
+
+  .dialog-install-panel {
+    grid-area: install;
+  }
+
+  .dialog-install-panel,
   .markdown-preview,
   .comments-panel,
   .updates-panel {
@@ -1166,8 +1358,18 @@ main {
   }
 
   .hero-copy,
-  .panel {
+  .panel,
+  .install-home-panel {
     border-radius: 24px;
+  }
+
+  .install-home-panel {
+    gap: 14px;
+    padding: 20px;
+  }
+
+  .install-home-panel::before {
+    display: none;
   }
 
   .hero-actions,
