@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import mimetypes
 import posixpath
@@ -30,7 +31,11 @@ from urllib.parse import quote, unquote, urlparse
 
 
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
+MAX_EXTRACTED_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_FILES = 5000
+MAX_ARCHIVE_PATH_LENGTH = 512
 TEXT_FALLBACK_MIME = "text/plain; charset=utf-8"
+API_VERSION = "1.1"
 
 
 @dataclass(frozen=True)
@@ -52,13 +57,14 @@ class ServerConfig:
 
 
 class SkillShareHandler(SimpleHTTPRequestHandler):
-    server_version = "SkillShare/1.0"
+    server_version = f"SkillShare/{API_VERSION}"
     config: ServerConfig
 
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Skill-Name, X-Skill-Folder")
+        self.send_header("X-Content-Type-Options", "nosniff")
         super().end_headers()
 
     def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
@@ -68,11 +74,36 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlparse(self.path)
         if parsed.path == "/api/health":
-            self.send_json({"ok": True, "service": "skill-share"})
+            self.send_json({"ok": True, "service": "skill-share", "apiVersion": API_VERSION})
+            return
+
+        if parsed.path in {"/api", "/api/manifest", "/.well-known/skill-share.json"}:
+            self.send_json(build_service_manifest())
+            return
+
+        if parsed.path == "/api/openapi.json":
+            self.send_json(build_openapi_spec())
+            return
+
+        if parsed.path == "/llms.txt":
+            self.send_text(build_llms_text(self.list_skills(include_markdown=False)))
             return
 
         if parsed.path == "/api/skills":
-            self.send_json({"skills": self.list_skills(include_markdown=False)})
+            skills = self.list_skills(include_markdown=False)
+            self.send_json(
+                {
+                    "apiVersion": API_VERSION,
+                    "count": len(skills),
+                    "skills": skills,
+                    "links": {
+                        "self": "/api/skills",
+                        "upload": "/api/skills/upload",
+                        "agentGuide": "/llms.txt",
+                        "openapi": "/api/openapi.json",
+                    },
+                }
+            )
             return
 
         skill_route = self.parse_skill_route(parsed.path)
@@ -95,6 +126,9 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlparse(self.path)
+        if parsed.path == "/api/skills/upload":
+            self.handle_archive_upload()
+            return
         if parsed.path == "/api/skills":
             self.handle_upload()
             return
@@ -192,8 +226,77 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
 
         self.send_json({"skill": skill}, status=HTTPStatus.CREATED)
 
+    def handle_archive_upload(self) -> None:
+        content_length = int(self.headers.get("Content-Length", "0") or "0")
+        if content_length <= 0:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "Empty upload")
+            return
+        if content_length > MAX_UPLOAD_BYTES:
+            self.send_error_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Upload is too large")
+            return
+
+        content_type = self.headers.get("Content-Type", "")
+        body = self.rfile.read(content_length)
+        metadata: dict[str, Any] = {}
+
+        try:
+            if "multipart/form-data" in content_type:
+                multipart = parse_multipart(content_type, body)
+                archives = [
+                    item
+                    for item in multipart["files"]
+                    if item.get("field") in {"archive", "file"}
+                ]
+                if len(archives) != 1:
+                    raise ValueError("Upload exactly one zip file in the 'archive' field")
+                archive_content = archives[0]["content"]
+                metadata = parse_json_field(multipart["fields"].get("metadata"), {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                metadata["name"] = clean_scalar(multipart["fields"].get("name")) or metadata.get("name")
+                metadata["folderName"] = (
+                    clean_scalar(multipart["fields"].get("folderName"))
+                    or metadata.get("folderName")
+                )
+            elif content_type.split(";", 1)[0].strip().lower() in {
+                "application/zip",
+                "application/octet-stream",
+            }:
+                archive_content = body
+                metadata = {
+                    "name": clean_scalar(self.headers.get("X-Skill-Name")),
+                    "folderName": clean_scalar(self.headers.get("X-Skill-Folder")),
+                }
+            else:
+                raise ValueError("Expected multipart/form-data or application/zip")
+
+            form = form_from_skill_archive(archive_content, metadata)
+            skill = self.save_uploaded_skill(form)
+        except (ValueError, zipfile.BadZipFile) as exc:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except Exception as exc:  # pragma: no cover - returned to client and logged.
+            self.log_message("Archive upload failed: %s", exc)
+            self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, "Archive upload failed")
+            return
+
+        self.send_json(
+            {
+                "skill": skill,
+                "links": {
+                    "detail": skill["detailUrl"],
+                    "download": skill["downloadUrl"],
+                    "catalog": "/api/skills",
+                },
+            },
+            status=HTTPStatus.CREATED,
+        )
+
     def save_uploaded_skill(self, form: dict[str, Any]) -> dict[str, Any]:
+        ensure_storage(self.config)
         metadata = parse_json_field(form["fields"].get("metadata"), {})
+        if not isinstance(metadata, dict):
+            metadata = {}
         uploaded_files = form["files"]
         paths = form["fields"].get("paths", [])
         if isinstance(paths, str):
@@ -265,6 +368,9 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             "comments": existing_comments,
             "updateHistory": update_history,
             "downloadUrl": f"/api/skills/{quote(slug)}/download",
+            "detailUrl": f"/api/skills/{quote(slug)}",
+            "filesUrl": f"/api/skills/{quote(slug)}/files",
+            "commentsUrl": f"/api/skills/{quote(slug)}/comments",
         }
 
         (tmp_dir / "metadata.json").write_text(
@@ -366,7 +472,7 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         zip_path = self.config.tmp_dir / f"{metadata['id']}-{uuid.uuid4().hex}.zip"
         zip_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            create_skill_zip(skill_dir, zip_path)
+            create_skill_zip(skill_dir, zip_path, include_platform_data=False)
             content = zip_path.read_bytes()
         finally:
             if zip_path.exists():
@@ -465,7 +571,7 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         backup_dir = self.config.backups_dir / safe_path_part(slug)
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup_path = backup_dir / f"{timestamp_for_file()}-{uuid.uuid4().hex[:8]}-{reason}.zip"
-        create_skill_zip(skill_dir, backup_path)
+        create_skill_zip(skill_dir, backup_path, include_platform_data=True)
         return backup_path
 
     def send_json(self, payload: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -475,6 +581,14 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+    def send_text(self, content: str, status: HTTPStatus = HTTPStatus.OK) -> None:
+        encoded = content.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
 
     def send_error_json(self, status: HTTPStatus, message: str) -> None:
         self.send_json({"error": message}, status=status)
@@ -528,6 +642,106 @@ def parse_json_field(value: Any, default: Any) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+def form_from_skill_archive(content: bytes, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not content:
+        raise ValueError("Archive is empty")
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Uploaded file is not a valid zip archive") from exc
+
+    with archive:
+        entries = [entry for entry in archive.infolist() if not entry.is_dir()]
+        if not entries:
+            raise ValueError("Archive contains no files")
+        if len(entries) > MAX_ARCHIVE_FILES:
+            raise ValueError(f"Archive contains more than {MAX_ARCHIVE_FILES} files")
+
+        total_size = sum(entry.file_size for entry in entries)
+        if total_size > MAX_EXTRACTED_BYTES:
+            raise ValueError("Archive expands beyond the allowed size")
+
+        normalized_entries: list[tuple[zipfile.ZipInfo, str]] = []
+        for entry in entries:
+            if entry.flag_bits & 0x1:
+                raise ValueError(f"Encrypted archive entries are not supported: {entry.filename}")
+            if len(entry.filename) > MAX_ARCHIVE_PATH_LENGTH:
+                raise ValueError("Archive contains an excessively long path")
+            if is_zip_symlink(entry):
+                raise ValueError(f"Symbolic links are not supported: {entry.filename}")
+
+            normalized_path = safe_relative_path(entry.filename)
+            if normalized_path.startswith("__MACOSX/") or PurePosixPath(normalized_path).name == ".DS_Store":
+                continue
+            normalized_entries.append((entry, normalized_path))
+
+        skill_paths = [
+            PurePosixPath(path)
+            for _entry, path in normalized_entries
+            if PurePosixPath(path).name.lower() == "skill.md"
+        ]
+        if not skill_paths:
+            raise ValueError("Archive must contain a SKILL.md file")
+
+        shallowest_depth = min(len(path.parent.parts) for path in skill_paths)
+        roots = {
+            path.parent
+            for path in skill_paths
+            if len(path.parent.parts) == shallowest_depth
+        }
+        if len(roots) != 1:
+            raise ValueError("Archive must contain exactly one top-level Skill")
+        root = next(iter(roots))
+
+        files: list[dict[str, Any]] = []
+        paths: list[str] = []
+        seen_paths: set[str] = set()
+        root_prefix = root.as_posix()
+        for entry, archive_path in normalized_entries:
+            path = PurePosixPath(archive_path)
+            if root_prefix != ".":
+                try:
+                    path = path.relative_to(root)
+                except ValueError:
+                    continue
+            relative_path = safe_relative_path(path.as_posix())
+            casefolded_path = relative_path.casefold()
+            if casefolded_path in seen_paths:
+                raise ValueError(f"Archive contains duplicate file paths: {relative_path}")
+            seen_paths.add(casefolded_path)
+            files.append(
+                {
+                    "field": "files",
+                    "filename": relative_path,
+                    "content": archive.read(entry),
+                    "content_type": mimetypes.guess_type(relative_path)[0] or "application/octet-stream",
+                }
+            )
+            paths.append(relative_path)
+
+    if not any(path.lower() == "skill.md" for path in paths):
+        raise ValueError("SKILL.md must be at the root of the Skill folder")
+
+    resolved_metadata = dict(metadata or {})
+    if not clean_scalar(resolved_metadata.get("folderName")) and root.name not in {"", "."}:
+        resolved_metadata["folderName"] = root.name
+
+    return {
+        "fields": {
+            "name": clean_scalar(resolved_metadata.get("name")),
+            "metadata": json.dumps(resolved_metadata, ensure_ascii=False),
+            "paths": paths,
+        },
+        "files": files,
+    }
+
+
+def is_zip_symlink(entry: zipfile.ZipInfo) -> bool:
+    unix_mode = (entry.external_attr >> 16) & 0xFFFF
+    return (unix_mode & 0o170000) == 0o120000
 
 
 def find_uploaded_text(files: list[tuple[str, bytes, str]], wanted_name: str) -> str:
@@ -617,9 +831,11 @@ def summarize_text(text: str, limit: int = 120) -> str:
 
 
 def safe_relative_path(raw_path: str) -> str:
-    value = str(raw_path or "").replace("\\", "/").strip().lstrip("/")
+    value = str(raw_path or "").replace("\\", "/").strip()
     if not value:
         raise ValueError("Uploaded file has no relative path")
+    if value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        raise ValueError(f"Absolute paths are not allowed: {raw_path}")
 
     path = PurePosixPath(value)
     if path.is_absolute():
@@ -672,6 +888,9 @@ def normalize_tags(value: Any) -> list[str]:
 def normalize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     skill_id = clean_scalar(metadata.get("id")) or unique_slug(clean_scalar(metadata.get("name")) or "skill")
     download_url = clean_scalar(metadata.get("downloadUrl")) or f"/api/skills/{quote(skill_id)}/download"
+    detail_url = clean_scalar(metadata.get("detailUrl")) or f"/api/skills/{quote(skill_id)}"
+    files_url = clean_scalar(metadata.get("filesUrl")) or f"/api/skills/{quote(skill_id)}/files"
+    comments_url = clean_scalar(metadata.get("commentsUrl")) or f"/api/skills/{quote(skill_id)}/comments"
     return {
         "id": skill_id,
         "name": clean_scalar(metadata.get("name")) or skill_id,
@@ -684,23 +903,22 @@ def normalize_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "fileCount": int(metadata.get("fileCount") or 0),
         "size": int(metadata.get("size") or 0),
         "downloadUrl": download_url,
+        "detailUrl": detail_url,
+        "filesUrl": files_url,
+        "commentsUrl": comments_url,
     }
 
 
-def create_skill_zip(skill_dir: Path, zip_path: Path) -> None:
+def create_skill_zip(skill_dir: Path, zip_path: Path, include_platform_data: bool = False) -> None:
     files_dir = skill_dir / "files"
     metadata = read_json(skill_dir / "metadata.json") or {}
     top_folder = safe_path_part(metadata.get("folderName") or metadata.get("name") or skill_dir.name)
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        metadata_path = skill_dir / "metadata.json"
-        if metadata_path.exists():
-            archive.write(metadata_path, f"{top_folder}/metadata.json")
-        comments_path = skill_dir / "comments.json"
-        if comments_path.exists():
-            archive.write(comments_path, f"{top_folder}/comments.json")
-        history_path = skill_dir / "history.json"
-        if history_path.exists():
-            archive.write(history_path, f"{top_folder}/history.json")
+        if include_platform_data:
+            for platform_file in ("metadata.json", "comments.json", "history.json"):
+                platform_path = skill_dir / platform_file
+                if platform_path.exists():
+                    archive.write(platform_path, f".skill-share/{platform_file}")
         for path in sorted(files_dir.rglob("*")):
             if path.is_file():
                 archive.write(path, f"{top_folder}/{path.relative_to(files_dir).as_posix()}")
@@ -810,6 +1028,215 @@ def select_featured_comment(comments: list[dict[str, Any]]) -> dict[str, Any] | 
         comments,
         key=lambda item: (len(clean_scalar(item.get("body"))), clean_scalar(item.get("createdAt"))),
     )
+
+
+def build_service_manifest() -> dict[str, Any]:
+    return {
+        "service": "m5stack-skill-share",
+        "name": "M5Stack Skill Share",
+        "apiVersion": API_VERSION,
+        "description": "LAN service for discovering, uploading, downloading, and discussing Codex Skills.",
+        "authentication": "none; trusted LAN only",
+        "agentEntry": "/llms.txt",
+        "capabilities": ["list", "inspect", "download", "upload-zip", "comments"],
+        "links": {
+            "home": "/",
+            "health": "/api/health",
+            "catalog": "/api/skills",
+            "uploadZip": "/api/skills/upload",
+            "openapi": "/api/openapi.json",
+            "agentGuide": "/llms.txt",
+        },
+        "workflows": {
+            "download": [
+                "GET /api/skills",
+                "Select a skill by id",
+                "GET /api/skills/{id}/download",
+                "Extract the returned zip into the local Codex skills directory",
+            ],
+            "upload": [
+                "Create one zip containing exactly one Skill folder with SKILL.md at its root",
+                "POST /api/skills/upload as multipart field archive or raw application/zip",
+                "Check the 201 response and confirm the Skill appears in GET /api/skills",
+            ],
+        },
+        "limits": {
+            "maxUploadBytes": MAX_UPLOAD_BYTES,
+            "maxExtractedBytes": MAX_EXTRACTED_BYTES,
+            "maxArchiveFiles": MAX_ARCHIVE_FILES,
+        },
+    }
+
+
+def build_llms_text(skills: list[dict[str, Any]]) -> str:
+    lines = [
+        "# M5Stack Skill Share",
+        "",
+        "This is a trusted-LAN Codex Skill repository. No extra Skill is required to use it.",
+        "Treat the URL of this file as BASE_URL and resolve all paths below against it.",
+        "",
+        "## Discovery",
+        "",
+        "- Service manifest: GET /api/manifest",
+        "- OpenAPI description: GET /api/openapi.json",
+        "- Health check: GET /api/health",
+        "- Live Skill catalog: GET /api/skills",
+        "",
+        "## Download workflow",
+        "",
+        "1. GET /api/skills and choose a skill by its id.",
+        "2. Optionally GET /api/skills/{id} for SKILL.md, comments, and update history.",
+        "3. GET /api/skills/{id}/download and save the response as a zip file.",
+        "4. Extract the whole top-level folder into the local Codex skills directory.",
+        "5. Confirm the installed path is <skills-dir>/<skill-name>/SKILL.md.",
+        "",
+        "## Upload workflow",
+        "",
+        "Upload one zip containing exactly one Skill folder. SKILL.md must be at that folder's root.",
+        "Preferred request: POST /api/skills/upload with multipart/form-data field archive=@skill.zip.",
+        "Raw zip is also accepted with Content-Type: application/zip; optional headers are X-Skill-Name and X-Skill-Folder.",
+        "A successful upload returns HTTP 201. Uploading the same Skill name updates it and keeps a server backup.",
+        "",
+        "Example:",
+        "curl.exe -X POST \"<BASE_URL>/api/skills/upload\" -F \"archive=@C:\\path\\skill.zip\"",
+        "",
+        "## Other endpoints",
+        "",
+        "- GET /api/skills/{id}/files returns all files as base64 JSON.",
+        "- GET /api/skills/{id}/comments lists comments.",
+        "- POST /api/skills/{id}/comments accepts JSON: {\"author\":\"name\",\"body\":\"text\"}.",
+        "- DELETE /api/skills/{id} is destructive and should only be used after explicit user confirmation.",
+        "",
+        "## Current catalog",
+        "",
+    ]
+    if not skills:
+        lines.append("No Skills are currently shared. Use GET /api/skills for the live catalog.")
+    else:
+        for skill in skills:
+            skill_id = clean_scalar(skill.get("id"))
+            name = re.sub(r"\s+", " ", clean_scalar(skill.get("name")))
+            description = re.sub(r"\s+", " ", clean_scalar(skill.get("description")))
+            lines.append(
+                f"- id={skill_id} | name={name} | description={description} | "
+                f"download=/api/skills/{quote(skill_id)}/download"
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_openapi_spec() -> dict[str, Any]:
+    skill_id_parameter = {
+        "name": "skill_id",
+        "in": "path",
+        "required": True,
+        "schema": {"type": "string"},
+        "description": "Skill id from GET /api/skills",
+    }
+    return {
+        "openapi": "3.1.0",
+        "info": {
+            "title": "M5Stack Skill Share API",
+            "version": API_VERSION,
+            "description": "Self-describing trusted-LAN API for Codex Skill sharing. No authentication is configured.",
+        },
+        "servers": [{"url": "/", "description": "Current Skill Share host"}],
+        "paths": {
+            "/api/health": {
+                "get": {"summary": "Check service health", "responses": {"200": {"description": "Healthy"}}}
+            },
+            "/api/manifest": {
+                "get": {"summary": "Discover service capabilities", "responses": {"200": {"description": "Manifest"}}}
+            },
+            "/api/skills": {
+                "get": {
+                    "summary": "List shared Skills",
+                    "responses": {"200": {"description": "Catalog with direct resource links"}},
+                },
+                "post": {
+                    "summary": "Upload browser-selected Skill files",
+                    "description": "Compatibility endpoint used by the web UI. Agents should prefer POST /api/skills/upload.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {"multipart/form-data": {"schema": {"type": "object"}}},
+                    },
+                    "responses": {"201": {"description": "Created or updated"}},
+                },
+            },
+            "/api/skills/upload": {
+                "post": {
+                    "summary": "Upload one Skill zip",
+                    "description": "The archive must contain exactly one Skill folder with SKILL.md at its root.",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["archive"],
+                                    "properties": {
+                                        "archive": {"type": "string", "format": "binary"},
+                                        "name": {"type": "string"},
+                                        "folderName": {"type": "string"},
+                                        "metadata": {"type": "string", "description": "Optional JSON metadata"},
+                                    },
+                                }
+                            },
+                            "application/zip": {"schema": {"type": "string", "format": "binary"}},
+                        },
+                    },
+                    "responses": {
+                        "201": {"description": "Created or updated"},
+                        "400": {"description": "Invalid or unsafe archive"},
+                        "413": {"description": "Upload exceeds limits"},
+                    },
+                }
+            },
+            "/api/skills/{skill_id}": {
+                "parameters": [skill_id_parameter],
+                "get": {"summary": "Get Skill details", "responses": {"200": {"description": "Details"}}},
+                "delete": {
+                    "summary": "Delete a Skill",
+                    "description": "Destructive. Callers must obtain explicit user confirmation.",
+                    "responses": {"200": {"description": "Deleted after retaining a server backup"}},
+                },
+            },
+            "/api/skills/{skill_id}/download": {
+                "parameters": [skill_id_parameter],
+                "get": {
+                    "summary": "Download an installable Skill zip",
+                    "responses": {"200": {"description": "Zip archive"}},
+                },
+            },
+            "/api/skills/{skill_id}/files": {
+                "parameters": [skill_id_parameter],
+                "get": {"summary": "Get Skill files as base64 JSON", "responses": {"200": {"description": "Files"}}},
+            },
+            "/api/skills/{skill_id}/comments": {
+                "parameters": [skill_id_parameter],
+                "get": {"summary": "List comments", "responses": {"200": {"description": "Comments"}}},
+                "post": {
+                    "summary": "Add a comment",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["body"],
+                                    "properties": {
+                                        "author": {"type": "string", "maxLength": 40},
+                                        "body": {"type": "string", "maxLength": 1200},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {"201": {"description": "Comment created"}},
+                },
+            },
+        },
+    }
 
 
 def clean_scalar(value: Any) -> str:

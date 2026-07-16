@@ -178,6 +178,27 @@ python3 ./server/skill_share_server.py --host 0.0.0.0 --port 1885 --public-dir .
 
 页面已经按以下接口对接。管理脚本启动的服务已完整实现这些接口。
 
+### Codex / Agent 自助发现
+
+只需要把共享站首页地址告诉 Codex。首页 HTML 已内嵌机器可读入口，Codex 可以按以下顺序自行发现能力：
+
+```text
+GET /llms.txt                    # Agent 操作指南，并附当前 Skill 摘要
+GET /api/manifest               # 服务能力与工作流清单
+GET /api/openapi.json           # OpenAPI 3.1 接口描述
+GET /.well-known/skill-share.json
+GET /api/skills                 # 实时 Skill 资源目录
+```
+
+推荐直接告诉 Codex：
+
+```text
+访问 http://共享站地址:1885/llms.txt，读取实时 Skill 目录和接口说明，
+根据我的请求自行下载或上传 Skill；不要删除任何 Skill，除非我明确确认。
+```
+
+服务默认没有登录鉴权，只能部署在可信局域网中，不要映射到公网。
+
 ### 健康检查
 
 ```http
@@ -194,6 +215,8 @@ GET /api/skills
 
 ```json
 {
+  "apiVersion": "1.1",
+  "count": 1,
   "skills": [
     {
       "id": "frontend-design",
@@ -210,13 +233,56 @@ GET /api/skills
         "at": "2026-05-20T08:00:00Z",
         "version": "1.0.0"
       },
-      "downloadUrl": "/api/skills/frontend-design/download"
+      "downloadUrl": "/api/skills/frontend-design/download",
+      "detailUrl": "/api/skills/frontend-design",
+      "filesUrl": "/api/skills/frontend-design/files"
     }
-  ]
+  ],
+  "links": {
+    "upload": "/api/skills/upload",
+    "agentGuide": "/llms.txt",
+    "openapi": "/api/openapi.json"
+  }
 }
 ```
 
-### 上传或覆盖 Skill
+### Codex 上传 zip（推荐）
+
+压缩包必须只包含一个 Skill，并保持 `skill-name/SKILL.md` 结构：
+
+```http
+POST /api/skills/upload
+Content-Type: multipart/form-data
+```
+
+multipart 字段：
+
+- `archive`: 必填，Skill zip 文件
+- `name`: 可选，覆盖从 `SKILL.md` 解析出的名称
+- `folderName`: 可选，指定下载包顶层目录名
+- `metadata`: 可选，JSON 字符串
+
+PowerShell / Codex 示例：
+
+```powershell
+$skill = "C:\Users\你的用户名\.codex\skills\skill-name"
+$zip = Join-Path $env:TEMP "skill-name.zip"
+Compress-Archive -LiteralPath $skill -DestinationPath $zip -Force
+curl.exe -X POST "http://共享站地址:1885/api/skills/upload" -F "archive=@$zip"
+```
+
+也可以直接发送 zip 字节：
+
+```http
+POST /api/skills/upload
+Content-Type: application/zip
+X-Skill-Name: skill-name
+X-Skill-Folder: skill-name
+```
+
+服务会拒绝路径穿越、符号链接、加密条目、多个顶层 Skill，以及超过文件数或解压大小限制的压缩包。同名上传会先备份旧版本，再更新共享版本。
+
+### 浏览器多文件上传（兼容接口）
 
 ```http
 POST /api/skills
@@ -267,7 +333,7 @@ Content-Type: application/json
 GET /api/skills/:id/download
 ```
 
-返回 zip 文件。用户需要按页面提示解压到 `C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md` 这种目录结构。
+返回只包含可安装 Skill 文件的 zip。用户或 Codex 需要按页面提示解压到 `C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md` 这种目录结构；评论、更新历史等平台数据不会混入安装包。
 
 ### 从共享区删除
 

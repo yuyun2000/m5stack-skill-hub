@@ -3,8 +3,28 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="M5Stack 内部 Codex Skill 共享服务，支持网页与 Agent 自助发现、上传和下载。"
+    />
     <title>M5Stack Skill Share</title>
+    <link rel="icon" href="data:," />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="Codex agent guide" />
+    <link rel="alternate" type="application/json" href="/api/skills" title="Live Skill catalog" />
+    <link rel="service-desc" type="application/vnd.oai.openapi+json" href="/api/openapi.json" />
     <link rel="stylesheet" href="./styles.css" />
+    <script type="application/json" id="skillShareAgentManifest">
+      {
+        "service": "m5stack-skill-share",
+        "agentEntry": "/llms.txt",
+        "manifest": "/api/manifest",
+        "openapi": "/api/openapi.json",
+        "catalog": "/api/skills",
+        "uploadZip": "/api/skills/upload",
+        "downloadTemplate": "/api/skills/{id}/download",
+        "authentication": "none; trusted LAN only"
+      }
+    </script>
   </head>
   <body>
     <div class="page-shell">
@@ -23,18 +43,22 @@
         <section class="hero-grid compact-hero" id="top">
           <div class="hero-copy">
             <p class="eyebrow">M5Stack internal</p>
-            <h1>共享 Codex Skill，复用产品与工作流经验。</h1>
+            <h1>把地址交给 Codex，Skill 自助流转。</h1>
             <p class="hero-lede">
-              上传、评论、下载都在局域网内完成。适合沉淀产品资料、技术支持、文档翻译和研发提效相关 Skill。
+              人可以直接浏览，Codex 也能从同一个页面发现资源目录、读取接口说明，并在局域网内完成 Skill 上传和下载。
             </p>
+            <div class="hero-actions">
+              <a class="primary-action" href="#codex-access">Codex 自助入口</a>
+              <a class="ghost-action" href="/api/skills" data-api-path="/api/skills">查看资源 JSON</a>
+            </div>
           </div>
 
           <aside class="quick-card compact-card" aria-label="平台要点">
             <span class="card-label">平台要点</span>
             <ol class="flow-list">
-              <li><strong>先看共享</strong><span>打开即可搜索已分享 Skill。</span></li>
-              <li><strong>评论补充</strong><span>补充说明用途和注意事项。</span></li>
-              <li><strong>下载 zip</strong><span>保留 <code>skill-name\SKILL.md</code> 目录结构。</span></li>
+              <li><strong>一个入口</strong><span>网页与 Agent 共用同一服务地址。</span></li>
+              <li><strong>接口自描述</strong><span>HTML、llms.txt 与 OpenAPI 同步暴露能力。</span></li>
+              <li><strong>上传下载闭环</strong><span>Codex 可直接处理标准 Skill zip。</span></li>
             </ol>
           </aside>
         </section>
@@ -59,6 +83,89 @@
             <span>正确结构</span>
             <code>C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md</code>
           </div>
+        </section>
+
+        <section class="agent-access-band" id="codex-access" aria-labelledby="agentAccessTitle">
+          <div class="agent-access-head">
+            <div>
+              <p class="eyebrow">Codex self-service</p>
+              <h2 id="agentAccessTitle">只给这个内部地址，Codex 就能自行发现接口。</h2>
+              <p>
+                根页面同时提供机器可读入口。Codex 应先读取 <a href="/llms.txt" data-api-path="/llms.txt">llms.txt</a>，
+                再按实时目录完成检索、下载或上传，无需预装其他 Skill。
+              </p>
+            </div>
+            <nav class="agent-links" aria-label="Agent 资源入口">
+              <a href="/llms.txt" data-api-path="/llms.txt">Agent 指南</a>
+              <a href="/api/skills" data-api-path="/api/skills">资源目录</a>
+              <a href="/api/manifest" data-api-path="/api/manifest">服务清单</a>
+              <a href="/api/openapi.json" data-api-path="/api/openapi.json">OpenAPI</a>
+            </nav>
+          </div>
+
+          <div class="agent-prompt-block">
+            <div class="code-block-head">
+              <div>
+                <span>可直接告诉 Codex</span>
+                <small>当前服务：<code id="agentBaseUrl">正在识别...</code></small>
+              </div>
+              <button class="copy-button" id="copyAgentPromptBtn" type="button">复制提示词</button>
+            </div>
+            <pre id="agentPrompt">访问这个地址的 /llms.txt，读取共享 Skill 列表和接口说明。按我的需求自行下载或上传 Skill；删除前必须先征得我确认。</pre>
+          </div>
+
+          <div class="agent-doc-grid">
+            <article class="agent-workflow">
+              <span class="workflow-index">01</span>
+              <h3>发现与下载</h3>
+              <ol>
+                <li><code>GET /api/skills</code> 获取实时资源列表与每个 Skill 的链接。</li>
+                <li><code>GET /api/skills/{id}</code> 读取 SKILL.md、评论和更新记录。</li>
+                <li><code>GET /api/skills/{id}/download</code> 下载可直接安装的 zip。</li>
+              </ol>
+            </article>
+
+            <article class="agent-workflow">
+              <span class="workflow-index">02</span>
+              <h3>打包与上传</h3>
+              <ol>
+                <li>压缩一个 Skill 文件夹，确认根目录中存在 <code>SKILL.md</code>。</li>
+                <li>把 zip 作为 <code>archive</code> 字段提交到 <code>POST /api/skills/upload</code>。</li>
+                <li>收到 <code>201</code> 后重新读取目录，确认共享版本已创建或更新。</li>
+              </ol>
+            </article>
+          </div>
+
+          <div class="agent-command-block">
+            <div class="code-block-head">
+              <div>
+                <span>Codex / PowerShell 上传命令</span>
+                <small>压缩包只能包含一个 Skill；同名上传会备份旧版本后更新。</small>
+              </div>
+              <button class="copy-button" id="copyUploadCommandBtn" type="button">复制命令</button>
+            </div>
+            <pre id="uploadCommand">curl.exe -X POST "&lt;BASE_URL&gt;/api/skills/upload" -F "archive=@C:\path\skill.zip"</pre>
+          </div>
+
+          <div class="endpoint-table-wrap">
+            <table class="endpoint-table">
+              <caption>可直接爬取的接口</caption>
+              <thead>
+                <tr><th>方法</th><th>路径</th><th>用途</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><span class="method get">GET</span></td><td><a href="/api/skills" data-api-path="/api/skills">/api/skills</a></td><td>实时 Skill 目录</td></tr>
+                <tr><td><span class="method get">GET</span></td><td>/api/skills/{id}</td><td>详情、说明与历史</td></tr>
+                <tr><td><span class="method get">GET</span></td><td>/api/skills/{id}/download</td><td>可安装 zip</td></tr>
+                <tr><td><span class="method post">POST</span></td><td>/api/skills/upload</td><td>上传单个 Skill zip</td></tr>
+                <tr><td><span class="method get">GET</span></td><td><a href="/api/openapi.json" data-api-path="/api/openapi.json">/api/openapi.json</a></td><td>完整接口结构</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="agent-security-note">
+            该服务没有登录鉴权，仅应部署在可信局域网。删除接口属于破坏性操作，Codex 必须获得用户明确确认后才能调用。
+          </p>
         </section>
 
         <section class="panel library-panel" aria-labelledby="libraryTitle">
@@ -88,6 +195,10 @@
             <div class="heading-actions">
               <input id="defaultSkillsInput" type="file" webkitdirectory directory multiple hidden />
               <input id="customFolderInput" type="file" webkitdirectory directory multiple hidden />
+              <input id="skillZipInput" type="file" accept=".zip,application/zip" hidden />
+              <button class="small-button" id="pickSkillsFolderBtn" type="button">选择 Skills 目录</button>
+              <button class="small-button" id="pickSkillFolderBtn" type="button">选择单个 Skill</button>
+              <button class="small-button" id="pickSkillZipBtn" type="button">上传 zip</button>
               <button class="small-button" id="selectAllLocalBtn" type="button">全选</button>
               <button class="small-button muted" id="clearLocalBtn" type="button">清空</button>
             </div>
@@ -95,7 +206,8 @@
 
           <div class="hint-strip">
             <strong>本机目录：</strong>
-            选择 <code>C:\Users\你的用户名\.codex\skills</code>，页面会扫描其中包含 <code>SKILL.md</code> 的文件夹。
+            选择 <code>C:\Users\你的用户名\.codex\skills</code> 批量扫描，或直接上传只包含一个 Skill 的 zip。
+            zip 中必须保留 <code>skill-name\SKILL.md</code> 结构。
           </div>
 
           <div class="local-summary" id="localSummary">

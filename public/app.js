@@ -6,6 +6,10 @@ const els = {
   pickDefaultInlineBtn: document.querySelector("#pickDefaultInlineBtn"),
   defaultSkillsInput: document.querySelector("#defaultSkillsInput"),
   customFolderInput: document.querySelector("#customFolderInput"),
+  skillZipInput: document.querySelector("#skillZipInput"),
+  pickSkillsFolderBtn: document.querySelector("#pickSkillsFolderBtn"),
+  pickSkillFolderBtn: document.querySelector("#pickSkillFolderBtn"),
+  pickSkillZipBtn: document.querySelector("#pickSkillZipBtn"),
   selectAllLocalBtn: document.querySelector("#selectAllLocalBtn"),
   clearLocalBtn: document.querySelector("#clearLocalBtn"),
   localSummary: document.querySelector("#localSummary"),
@@ -36,6 +40,11 @@ const els = {
   commentAuthor: document.querySelector("#commentAuthor"),
   commentBody: document.querySelector("#commentBody"),
   updatesList: document.querySelector("#updatesList"),
+  agentBaseUrl: document.querySelector("#agentBaseUrl"),
+  agentPrompt: document.querySelector("#agentPrompt"),
+  uploadCommand: document.querySelector("#uploadCommand"),
+  copyAgentPromptBtn: document.querySelector("#copyAgentPromptBtn"),
+  copyUploadCommandBtn: document.querySelector("#copyUploadCommandBtn"),
 };
 
 const state = {
@@ -51,14 +60,19 @@ init();
 
 function init() {
   bindEvents();
+  renderAgentAccess();
   loadSharedSkills();
 }
 
 function bindEvents() {
   els.pickDefaultInlineBtn.addEventListener("click", () => els.defaultSkillsInput.click());
+  els.pickSkillsFolderBtn.addEventListener("click", () => els.defaultSkillsInput.click());
+  els.pickSkillFolderBtn.addEventListener("click", () => els.customFolderInput.click());
+  els.pickSkillZipBtn.addEventListener("click", () => els.skillZipInput.click());
 
   els.defaultSkillsInput.addEventListener("change", (event) => handleFolderInput(event, "default"));
   els.customFolderInput.addEventListener("change", (event) => handleFolderInput(event, "custom"));
+  els.skillZipInput.addEventListener("change", uploadSelectedZip);
 
   els.selectAllLocalBtn.addEventListener("click", toggleSelectAllLocal);
   els.clearLocalBtn.addEventListener("click", clearLocalSkills);
@@ -79,9 +93,74 @@ function bindEvents() {
   els.deleteSkillBtn.addEventListener("click", () => {
     if (state.activeSkill) deleteSharedSkill(state.activeSkill);
   });
+  if (els.copyAgentPromptBtn) {
+    els.copyAgentPromptBtn.addEventListener("click", () => {
+      copyText(els.agentPrompt.textContent, els.copyAgentPromptBtn, "提示词已复制");
+    });
+  }
+  if (els.copyUploadCommandBtn) {
+    els.copyUploadCommandBtn.addEventListener("click", () => {
+      copyText(els.uploadCommand.textContent, els.copyUploadCommandBtn, "上传命令已复制");
+    });
+  }
 
   const savedAuthor = localStorage.getItem("skillShareCommentAuthor");
   if (savedAuthor) els.commentAuthor.value = savedAuthor;
+}
+
+function renderAgentAccess() {
+  const baseUrl = API_BASE || window.location.origin;
+  if (els.agentBaseUrl) els.agentBaseUrl.textContent = baseUrl;
+
+  if (els.agentPrompt) {
+    els.agentPrompt.textContent = [
+      `访问 ${baseUrl}/llms.txt，读取 M5Stack 内部 Skill 共享站的实时目录和接口说明。`,
+      "根据我的请求自行检索 Skill；下载后保持 <skill-name>/SKILL.md 目录结构。",
+      "需要上传时，压缩目标 Skill 文件夹并调用 zip 上传接口，随后重新读取目录确认结果。",
+      "不要调用删除接口，除非我明确确认要删除具体 Skill。",
+    ].join("\n");
+  }
+
+  if (els.uploadCommand) {
+    els.uploadCommand.textContent = [
+      '$skill = "C:\\Users\\你的用户名\\.codex\\skills\\skill-name"',
+      '$zip = Join-Path $env:TEMP "skill-name.zip"',
+      'Compress-Archive -LiteralPath $skill -DestinationPath $zip -Force',
+      `curl.exe -X POST "${baseUrl}/api/skills/upload" -F "archive=@$zip"`,
+    ].join("\n");
+  }
+
+  document.querySelectorAll("[data-api-path]").forEach((link) => {
+    link.href = apiUrl(link.dataset.apiPath);
+  });
+}
+
+async function copyText(value, button, successMessage) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const input = document.createElement("textarea");
+      input.value = value;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.opacity = "0";
+      document.body.append(input);
+      input.select();
+      const copied = document.execCommand("copy");
+      input.remove();
+      if (!copied) throw new Error("Clipboard command failed");
+    }
+    const original = button.textContent;
+    button.textContent = "已复制";
+    toast(successMessage);
+    setTimeout(() => {
+      button.textContent = original;
+    }, 1600);
+  } catch (error) {
+    console.error(error);
+    toast("复制失败，请手动选择文本。", "warning");
+  }
 }
 
 async function loadSharedSkills() {
@@ -125,6 +204,42 @@ async function handleFolderInput(event, source) {
   } catch (error) {
     console.error(error);
     toast("解析文件夹失败，请确认浏览器允许读取所选目录。", "warning");
+  }
+}
+
+async function uploadSelectedZip(event) {
+  const input = event.target;
+  const archive = input.files && input.files[0];
+  input.value = "";
+  if (!archive) return;
+  if (!state.backendOnline) {
+    toast("共享服务未连接，暂时无法上传。", "warning");
+    return;
+  }
+
+  const originalLabel = els.pickSkillZipBtn.textContent;
+  els.pickSkillZipBtn.disabled = true;
+  els.pickSkillZipBtn.textContent = "上传中...";
+
+  try {
+    const formData = new FormData();
+    formData.append("archive", archive, archive.name);
+    const response = await fetch(apiUrl("/api/skills/upload"), {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+
+    if (payload.skill) addOrReplaceSharedSkill(normalizeSharedSkill(payload.skill));
+    renderSharedSkills();
+    toast(`已上传 ${(payload.skill && payload.skill.name) || archive.name}，共享目录已更新。`);
+  } catch (error) {
+    console.error(error);
+    toast(`zip 上传失败：${error.message}`, "warning");
+  } finally {
+    els.pickSkillZipBtn.disabled = false;
+    els.pickSkillZipBtn.textContent = originalLabel;
   }
 }
 
