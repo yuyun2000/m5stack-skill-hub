@@ -86,6 +86,7 @@ share-skill/
     index.html
     styles.css
     app.js
+    fonts/                 # Montserrat webfont（SIL OFL 1.1）
   server/                  # 共享服务端
     skill_share_server.py
     .data/                 # 自动创建：Skill 数据、评论、备份、临时文件
@@ -101,6 +102,17 @@ share-skill/
   README.md
   .gitignore
 ```
+
+## 界面风格
+
+页面按 M5Stack 官网的 Web 设计语言实现（对应内部 Skill `m5stack-web-design`，可在 Skill Hub 下载）：
+
+- 主色 M5 Blue `#0282CB`，正文 `#434343`，描边 `#E5E5E5`，页脚纯黑
+- 字体 Montserrat（400/500/700，随仓库打包在 `public/fonts/`，SIL OFL 1.1；中文回退雅黑 / PingFang）
+- 胶囊按钮、1px 描边卡片、16px 圆角；hover 才出现阴影
+- 文案短句、动词开头，参数优先于形容词
+
+设计 token 全部集中在 `public/styles.css` 顶部的 `:root`，改颜色、间距、圆角只改那一处，不要在组件里写新的十六进制色值。
 
 ## 使用流程
 

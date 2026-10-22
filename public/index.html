@@ -37,6 +37,11 @@
               <small>内部共享站</small>
             </span>
           </a>
+          <nav class="topbar-nav" aria-label="页面导航">
+            <a href="#library">共享区</a>
+            <a href="#upload">上传</a>
+            <a href="#codex-access">Codex 入口</a>
+          </nav>
           <div class="server-chip" id="serverStatus" aria-live="polite">正在连接共享服务...</div>
         </nav>
 
@@ -168,7 +173,7 @@
           </p>
         </section>
 
-        <section class="panel library-panel" aria-labelledby="libraryTitle">
+        <section class="panel library-panel" id="library" aria-labelledby="libraryTitle">
           <div class="section-heading library-heading">
             <div>
               <p class="eyebrow">共享区</p>
@@ -186,7 +191,7 @@
           <div class="skill-grid" id="sharedSkillGrid" aria-live="polite"></div>
         </section>
 
-        <section class="panel upload-panel" aria-labelledby="uploadTitle">
+        <section class="panel upload-panel" id="upload" aria-labelledby="uploadTitle">
           <div class="section-heading">
             <div>
               <p class="eyebrow">分享 Skill</p>
@@ -227,6 +232,27 @@
         </section>
       </main>
     </div>
+
+    <footer class="site-footer">
+      <div class="page-shell">
+        <div class="footer-brand">
+          <span class="brand-mark">M5</span>
+          <span>
+            <strong>M5Stack Skill Share</strong>
+            <small>内部共享站 · 仅限可信局域网</small>
+          </span>
+        </div>
+        <nav class="footer-links" aria-label="页脚链接">
+          <a href="/llms.txt">Agent 指南</a>
+          <a href="/api/skills">资源目录</a>
+          <a href="/api/openapi.json">OpenAPI</a>
+          <a href="#top">回到顶部</a>
+        </nav>
+        <p class="footer-meta">
+          服务无登录鉴权，只能部署在可信局域网；删除属于破坏性操作，必须人工确认。
+        </p>
+      </div>
+    </footer>
 
     <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
