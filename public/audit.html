@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="M5Stack Skill Share 操作日志：查看上传、更新、下载、评论和删除记录。" />
+    <title>操作日志 · M5Stack Skill Share</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="topbar">
+          <a class="brand" href="./index.html" aria-label="M5Stack Skill Share">
+            <span class="brand-mark">M5</span>
+            <span>
+              <strong>M5Stack Skill Share</strong>
+              <small>内部共享站</small>
+            </span>
+          </a>
+          <nav class="topbar-nav" aria-label="页面导航">
+            <a href="./index.html#library">共享区</a>
+            <a href="./index.html#upload">上传</a>
+            <a href="./index.html#codex-access">Codex 入口</a>
+            <a href="./audit.html" aria-current="page">操作日志</a>
+          </nav>
+          <div class="server-chip" id="serverStatus" aria-live="polite">正在连接共享服务...</div>
+        </div>
+      </header>
+
+      <main>
+        <section class="panel" aria-labelledby="auditTitle">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Operations</p>
+              <h2 id="auditTitle">操作日志</h2>
+              <p class="section-lede">
+                记录谁在什么时候上传、更新、下载、评论或删除了哪个 Skill。只保留操作元数据，不记录文件正文和评论内容。
+              </p>
+            </div>
+            <div class="heading-actions">
+              <button class="small-button" id="refreshBtn" type="button">刷新</button>
+              <a class="small-button" href="./index.html">返回共享区</a>
+            </div>
+          </div>
+
+          <div class="log-summary" id="logSummary" aria-live="polite"></div>
+
+          <form class="log-filters" id="filterForm" onsubmit="return false">
+            <label class="log-field">
+              <span>事件</span>
+              <select id="eventFilter">
+                <option value="">全部事件</option>
+                <option value="upload">上传</option>
+                <option value="update">更新</option>
+                <option value="download">下载</option>
+                <option value="comment">评论</option>
+                <option value="delete">删除</option>
+              </select>
+            </label>
+            <label class="log-field">
+              <span>Skill</span>
+              <input id="skillFilter" type="search" placeholder="名称或 ID" autocomplete="off" />
+            </label>
+            <label class="log-field">
+              <span>时间</span>
+              <select id="rangeFilter">
+                <option value="7">最近 7 天</option>
+                <option value="1">今天</option>
+                <option value="30">最近 30 天</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+            <button class="primary-action" id="applyBtn" type="submit">查询</button>
+            <button class="small-button" id="resetBtn" type="button">重置</button>
+          </form>
+
+          <div class="log-table-wrap">
+            <table class="log-table">
+              <caption class="visually-hidden">操作日志列表</caption>
+              <thead>
+                <tr>
+                  <th scope="col">时间</th>
+                  <th scope="col">事件</th>
+                  <th scope="col">Skill</th>
+                  <th scope="col">来源</th>
+                  <th scope="col">详情</th>
+                </tr>
+              </thead>
+              <tbody id="logBody"></tbody>
+            </table>
+          </div>
+
+          <div class="log-empty" id="logEmpty" hidden></div>
+
+          <div class="log-pager">
+            <span id="logCount">共 0 条</span>
+            <div class="log-pager-actions">
+              <button class="small-button" id="prevBtn" type="button" disabled>上一页</button>
+              <button class="small-button" id="nextBtn" type="button" disabled>下一页</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="site-footer">
+      <div class="page-shell">
+        <div class="footer-brand">
+          <span class="brand-mark">M5</span>
+          <span>
+            <strong>M5Stack Skill Share</strong>
+            <small>内部共享站 · 仅限可信局域网</small>
+          </span>
+        </div>
+        <nav class="footer-links" aria-label="页脚链接">
+          <a href="./index.html">共享区</a>
+          <a href="/llms.txt">Agent 指南</a>
+          <a href="/api/audit">日志 JSON</a>
+        </nav>
+        <p class="footer-meta">
+          日志按大小滚动保留，只记录操作元数据；删除 Skill 前请先确认备份策略。
+        </p>
+      </div>
+    </footer>
+
+    <script src="./audit.js" type="module"></script>
+  </body>
+</html>

@@ -88,6 +88,7 @@ class SkillShareServerTest(unittest.TestCase):
         guide = body.decode("utf-8")
         self.assertIn("GET /api/skills", guide)
         self.assertIn("POST /api/skills/upload", guide)
+        self.assertIn("GET /api/audit", guide)
 
         status, _headers, body = self.request("/api/manifest")
         manifest = json.loads(body)
@@ -100,6 +101,8 @@ class SkillShareServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("/api/skills/upload", openapi["paths"])
         self.assertIn("/api/skills/{skill_id}/download", openapi["paths"])
+        self.assertIn("/api/audit", openapi["paths"])
+        self.assertIn("audit-log", manifest["capabilities"])
 
     def test_multipart_upload_list_detail_and_download_round_trip(self) -> None:
         upload_body, content_type = self.multipart_archive(self.make_skill_zip())
@@ -147,6 +150,67 @@ class SkillShareServerTest(unittest.TestCase):
         payload = json.loads(body)
         self.assertEqual(status, 201)
         self.assertEqual(payload["skill"]["id"], "raw-skill")
+
+    def test_audit_log_records_lifecycle_and_filters(self) -> None:
+        upload_body, content_type = self.multipart_archive(self.make_skill_zip())
+        self.request(
+            "/api/skills/upload",
+            data=upload_body,
+            headers={"Content-Type": content_type},
+            method="POST",
+        )
+        self.request("/api/skills/demo-skill/download")
+        self.request(
+            "/api/skills/demo-skill/comments",
+            data=json.dumps({"author": "tester", "body": "内部备注不应写入日志"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        self.request(
+            "/api/skills/upload",
+            data=upload_body,
+            headers={"Content-Type": content_type},
+            method="POST",
+        )
+        self.request("/api/skills/demo-skill", method="DELETE")
+
+        status, _headers, body = self.request("/api/audit?limit=10")
+        payload = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["total"], 5)
+        self.assertEqual(
+            [item["event"] for item in payload["items"]],
+            ["delete", "update", "comment", "download", "upload"],
+        )
+        self.assertEqual(payload["summary"]["upload"], 1)
+        self.assertEqual(payload["summary"]["update"], 1)
+        self.assertEqual(payload["summary"]["download"], 1)
+        self.assertEqual(payload["summary"]["comment"], 1)
+        self.assertEqual(payload["summary"]["delete"], 1)
+
+        comment_item = next(item for item in payload["items"] if item["event"] == "comment")
+        self.assertEqual(comment_item["detail"]["author"], "tester")
+        self.assertNotIn("内部备注", json.dumps(comment_item, ensure_ascii=False))
+        self.assertEqual(comment_item["skill"]["id"], "demo-skill")
+
+        status, _headers, body = self.request("/api/audit?event=download")
+        self.assertEqual(status, 200)
+        filtered = json.loads(body)
+        self.assertEqual(filtered["total"], 1)
+        self.assertEqual(filtered["items"][0]["event"], "download")
+        self.assertGreater(filtered["items"][0]["detail"]["size"], 0)
+
+        status, _headers, body = self.request("/api/audit?skill=demo")
+        self.assertEqual(json.loads(body)["total"], 5)
+
+        status, _headers, body = self.request("/api/audit?limit=2&offset=3")
+        page = json.loads(body)
+        self.assertEqual(page["total"], 5)
+        self.assertEqual(len(page["items"]), 2)
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            self.request("/api/audit?event=unknown")
+        self.assertEqual(context.exception.code, 400)
 
     def test_archive_path_traversal_is_rejected(self) -> None:
         content = io.BytesIO()

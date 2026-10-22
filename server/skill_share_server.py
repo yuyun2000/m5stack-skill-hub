@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime
 import io
 import json
 import mimetypes
@@ -17,6 +18,7 @@ import posixpath
 import re
 import shutil
 import sys
+import threading
 import time
 import uuid
 import zipfile
@@ -27,7 +29,7 @@ from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
@@ -36,6 +38,152 @@ MAX_ARCHIVE_FILES = 5000
 MAX_ARCHIVE_PATH_LENGTH = 512
 TEXT_FALLBACK_MIME = "text/plain; charset=utf-8"
 API_VERSION = "1.1"
+
+AUDIT_FILE_NAME = "audit.jsonl"
+AUDIT_MAX_BYTES = 4 * 1024 * 1024
+AUDIT_BACKUP_COUNT = 3
+AUDIT_MAX_SCAN = 5000
+AUDIT_EVENTS = ("upload", "update", "download", "comment", "delete")
+
+
+class AuditLog:
+    """追加写入的 JSONL 操作日志。
+
+    只记录操作元数据（谁在什么时候对哪个 Skill 做了什么），不记录文件正文、
+    评论正文或任何凭据。按大小滚动，最多保留 AUDIT_BACKUP_COUNT 份历史文件。
+    """
+
+    def __init__(self, path: Path, max_bytes: int = AUDIT_MAX_BYTES, backups: int = AUDIT_BACKUP_COUNT) -> None:
+        self.path = path
+        self.max_bytes = max_bytes
+        self.backups = backups
+        self._lock = threading.Lock()
+
+    def record(
+        self,
+        event: str,
+        *,
+        skill_id: str,
+        skill_name: str,
+        client: str = "",
+        user_agent: str = "",
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        entry = {
+            "id": uuid.uuid4().hex[:12],
+            "ts": int(time.time()),
+            "at": iso_now(),
+            "event": event,
+            "skill": {"id": skill_id, "name": skill_name},
+            "client": client,
+            "userAgent": user_agent,
+            "detail": detail or {},
+        }
+        line = json.dumps(entry, ensure_ascii=False)
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._rotate_if_needed()
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        return entry
+
+    def _rotate_if_needed(self) -> None:
+        try:
+            if self.path.stat().st_size < self.max_bytes:
+                return
+        except FileNotFoundError:
+            return
+        for index in range(self.backups - 1, 0, -1):
+            older = self.path.with_name(f"{self.path.name}.{index}")
+            newer = self.path.with_name(f"{self.path.name}.{index + 1}")
+            if older.exists():
+                older.replace(newer)
+        self.path.replace(self.path.with_name(f"{self.path.name}.1"))
+
+    def _entries(self) -> list[dict[str, Any]]:
+        files = [self.path] + [
+            self.path.with_name(f"{self.path.name}.{index}") for index in range(1, self.backups + 1)
+        ]
+        entries: list[dict[str, Any]] = []
+        for path in files:
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for line in reversed(text.splitlines()):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                entries.append(entry)
+                if len(entries) >= AUDIT_MAX_SCAN:
+                    return entries
+        return entries
+
+    def query(
+        self,
+        *,
+        event: str | None = None,
+        skill: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[int, list[dict[str, Any]], dict[str, int]]:
+        entries = self._entries()
+        summary: dict[str, int] = {name: 0 for name in AUDIT_EVENTS}
+        for entry in entries:
+            name = str(entry.get("event") or "")
+            if name in summary:
+                summary[name] += 1
+
+        needle = (skill or "").strip().lower()
+
+        def keep(entry: dict[str, Any]) -> bool:
+            if event and entry.get("event") != event:
+                return False
+            if needle:
+                meta = entry.get("skill") or {}
+                haystack = f"{meta.get('id', '')} {meta.get('name', '')}".lower()
+                if needle not in haystack:
+                    return False
+            try:
+                ts = int(entry.get("ts") or 0)
+            except (TypeError, ValueError):
+                ts = 0
+            if since is not None and ts < since:
+                return False
+            if until is not None and ts > until:
+                return False
+            return True
+
+        filtered = [entry for entry in entries if keep(entry)]
+        return len(filtered), filtered[offset : offset + limit], summary
+
+
+def parse_timestamp(value: str, end_of_day: bool = False) -> int | None:
+    """把 YYYY-MM-DD 或完整 ISO 时间转成 UTC 秒；无法解析返回 None。"""
+    value = (value or "").strip()
+    if not value:
+        return None
+    if value.isdigit():
+        return int(value)
+    try:
+        if len(value) == 10:
+            moment = datetime.datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
+            stamp = int(moment.timestamp())
+            return stamp + 86399 if end_of_day else stamp
+        moment = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=datetime.timezone.utc)
+        return int(moment.timestamp())
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)
@@ -59,6 +207,7 @@ class ServerConfig:
 class SkillShareHandler(SimpleHTTPRequestHandler):
     server_version = f"SkillShare/{API_VERSION}"
     config: ServerConfig
+    audit_log: AuditLog
 
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -87,6 +236,10 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/llms.txt":
             self.send_text(build_llms_text(self.list_skills(include_markdown=False)))
+            return
+
+        if parsed.path == "/api/audit":
+            self.handle_audit_query()
             return
 
         if parsed.path == "/api/skills":
@@ -150,6 +303,43 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         sys.stderr.write("[%s] %s\n" % (timestamp, fmt % args))
 
+    def client_ip(self) -> str:
+        forwarded = self.headers.get("X-Forwarded-For") or ""
+        if forwarded:
+            return forwarded.split(",")[0].strip()[:64]
+        return self.client_address[0] if self.client_address else ""
+
+    def client_user_agent(self) -> str:
+        return (self.headers.get("User-Agent") or "")[:160]
+
+    def record_event(self, event: str, skill: dict[str, Any], detail: dict[str, Any] | None = None) -> None:
+        try:
+            self.audit_log.record(
+                event,
+                skill_id=clean_scalar(skill.get("id")) or clean_scalar(skill.get("name")),
+                skill_name=clean_scalar(skill.get("name")),
+                client=self.client_ip(),
+                user_agent=self.client_user_agent(),
+                detail=detail,
+            )
+        except Exception as exc:  # pragma: no cover - 日志失败不影响主流程
+            self.log_message("Audit log failed: %s", exc)
+
+    def record_upload(self, skill: dict[str, Any], via: str) -> None:
+        history = skill.get("updateHistory") or []
+        action = history[-1].get("action") if history else "created"
+        event = "update" if action == "updated" else "upload"
+        self.record_event(
+            event,
+            skill,
+            {
+                "fileCount": skill.get("fileCount"),
+                "size": skill.get("size"),
+                "version": skill.get("version") or "",
+                "via": via,
+            },
+        )
+
     def serve_static(self, request_path: str) -> None:
         public_dir = self.config.public_dir.resolve()
         decoded_path = unquote(request_path)
@@ -198,6 +388,51 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             return skill_id, parts[1]
         return None
 
+    def handle_audit_query(self) -> None:
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+
+        event = (params.get("event") or [""])[0].strip().lower()
+        if event and event not in AUDIT_EVENTS:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "Unknown audit event type")
+            return
+
+        skill = (params.get("skill") or [""])[0].strip()
+        try:
+            limit = min(max(int((params.get("limit") or ["50"])[0]), 1), 200)
+            offset = max(int((params.get("offset") or ["0"])[0]), 0)
+        except ValueError:
+            self.send_error_json(HTTPStatus.BAD_REQUEST, "Invalid limit or offset")
+            return
+
+        since = parse_timestamp((params.get("since") or [""])[0])
+        until = parse_timestamp((params.get("until") or [""])[0], end_of_day=True)
+
+        total, items, summary = self.audit_log.query(
+            event=event or None,
+            skill=skill or None,
+            since=since,
+            until=until,
+            limit=limit,
+            offset=offset,
+        )
+        self.send_json(
+            {
+                "apiVersion": API_VERSION,
+                "total": total,
+                "count": len(items),
+                "limit": limit,
+                "offset": offset,
+                "summary": summary,
+                "items": items,
+                "links": {
+                    "self": "/api/audit",
+                    "page": "/audit.html",
+                    "catalog": "/api/skills",
+                },
+            }
+        )
+
     def handle_upload(self) -> None:
         content_length = int(self.headers.get("Content-Length", "0") or "0")
         if content_length <= 0:
@@ -224,6 +459,7 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, "Upload failed")
             return
 
+        self.record_upload(skill, via="multipart")
         self.send_json({"skill": skill}, status=HTTPStatus.CREATED)
 
     def handle_archive_upload(self) -> None:
@@ -280,6 +516,7 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             self.send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, "Archive upload failed")
             return
 
+        self.record_upload(skill, via="zip")
         self.send_json(
             {
                 "skill": skill,
@@ -437,6 +674,12 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
         }
         comments.append(comment)
         write_comments(skill_dir, comments)
+        skill_meta = self.load_skill(skill_id, include_markdown=False) or {"id": skill_id, "name": skill_id}
+        self.record_event(
+            "comment",
+            skill_meta,
+            {"author": author, "commentId": comment["id"], "length": len(body)},
+        )
         self.send_json({"comment": comment, "comments": comments, "commentCount": len(comments)}, status=HTTPStatus.CREATED)
 
     def handle_skill_files(self, skill_id: str) -> None:
@@ -478,6 +721,12 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
             if zip_path.exists():
                 zip_path.unlink()
 
+        self.record_event(
+            "download",
+            metadata,
+            {"size": len(content), "fileCount": metadata.get("fileCount")},
+        )
+
         filename = f"{safe_path_part(metadata.get('folderName') or metadata['name'])}.zip"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/zip")
@@ -495,6 +744,11 @@ class SkillShareHandler(SimpleHTTPRequestHandler):
 
         backup_path = self.backup_skill(metadata["id"], "delete")
         shutil.rmtree(skill_dir)
+        self.record_event(
+            "delete",
+            metadata,
+            {"backupKept": bool(backup_path), "fileCount": metadata.get("fileCount")},
+        )
         self.send_json(
             {
                 "ok": True,
@@ -1038,7 +1292,7 @@ def build_service_manifest() -> dict[str, Any]:
         "description": "LAN service for discovering, uploading, downloading, and discussing Codex Skills.",
         "authentication": "none; trusted LAN only",
         "agentEntry": "/llms.txt",
-        "capabilities": ["list", "inspect", "download", "upload-zip", "comments"],
+        "capabilities": ["list", "inspect", "download", "upload-zip", "comments", "audit-log"],
         "links": {
             "home": "/",
             "health": "/api/health",
@@ -1046,6 +1300,8 @@ def build_service_manifest() -> dict[str, Any]:
             "uploadZip": "/api/skills/upload",
             "openapi": "/api/openapi.json",
             "agentGuide": "/llms.txt",
+            "audit": "/api/audit",
+            "auditPage": "/audit.html",
         },
         "workflows": {
             "download": [
@@ -1099,6 +1355,13 @@ def build_llms_text(skills: list[dict[str, Any]]) -> str:
         "",
         "Example:",
         "curl.exe -X POST \"<BASE_URL>/api/skills/upload\" -F \"archive=@C:\\path\\skill.zip\"",
+        "",
+        "## Operation log",
+        "",
+        "GET /api/audit returns the newest operations first.",
+        "Filters: event=upload|update|download|comment|delete, skill=<id or name>, since/until (YYYY-MM-DD or ISO), limit (max 200), offset.",
+        "Entries record time, event, skill, client IP and user agent; file contents and comment bodies are never logged.",
+        "Human-readable view: /audit.html",
         "",
         "## Other endpoints",
         "",
@@ -1192,6 +1455,21 @@ def build_openapi_spec() -> dict[str, Any]:
                     },
                 }
             },
+            "/api/audit": {
+                "get": {
+                    "summary": "Query the operation log",
+                    "description": "Read-only audit trail for uploads, updates, downloads, comments and deletions. Only operation metadata is stored.",
+                    "parameters": [
+                        {"name": "event", "in": "query", "schema": {"type": "string", "enum": list(AUDIT_EVENTS)}},
+                        {"name": "skill", "in": "query", "schema": {"type": "string"}, "description": "Skill id or name fragment"},
+                        {"name": "since", "in": "query", "schema": {"type": "string"}, "description": "YYYY-MM-DD or ISO datetime (UTC)"},
+                        {"name": "until", "in": "query", "schema": {"type": "string"}, "description": "YYYY-MM-DD or ISO datetime (UTC)"},
+                        {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}},
+                        {"name": "offset", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}},
+                    ],
+                    "responses": {"200": {"description": "Filtered entries, newest first"}},
+                }
+            },
             "/api/skills/{skill_id}": {
                 "parameters": [skill_id_parameter],
                 "get": {"summary": "Get Skill details", "responses": {"200": {"description": "Details"}}},
@@ -1271,10 +1549,13 @@ def timestamp_for_file() -> str:
 
 
 def build_handler(config: ServerConfig) -> type[SkillShareHandler]:
+    audit_log = AuditLog(config.data_dir / AUDIT_FILE_NAME)
+
     class ConfiguredSkillShareHandler(SkillShareHandler):
         pass
 
     ConfiguredSkillShareHandler.config = config
+    ConfiguredSkillShareHandler.audit_log = audit_log
     return ConfiguredSkillShareHandler
 
 

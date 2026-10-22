@@ -86,6 +86,8 @@ share-skill/
     index.html
     styles.css
     app.js
+    audit.html             # 操作日志页面
+    audit.js
     fonts/                 # Montserrat webfont（SIL OFL 1.1）
   server/                  # 共享服务端
     skill_share_server.py
@@ -154,6 +156,18 @@ C:\Users\你的用户名\.codex\skills\skill-name\SKILL.md
 ```
 
 请注意：不要把 `SKILL.md` 直接放到 `.codex\skills` 根目录，也不要只复制 Skill 文件夹里的部分文件。Codex 需要识别 `skills\某个-skill-文件夹\SKILL.md` 这一层结构。
+
+## 操作日志
+
+上传、更新、下载、评论、删除都会写入一条操作记录，方便回答“谁在什么时候动过这个 Skill”。
+
+- 网页查看：`http://<服务地址>:1885/audit.html`，支持按事件、Skill 名称、时间范围筛选
+- 接口：`GET /api/audit?event=&skill=&since=&until=&limit=&offset=`，最新在前，返回条目与事件计数
+- 存储：`server/.data/audit.jsonl`（JSONL，单文件 4 MB 滚动，最多保留 3 份历史）
+- 只记录元数据：时间、事件、Skill、来源 IP、User-Agent、文件数/大小/评论作者等
+- **不记录**文件正文、评论内容、请求体或任何凭据
+
+日志文件属于运行数据，同样不应提交到 Git；如需长期留存可以定期从 `server/.data/audit.jsonl*` 复制归档。
 
 ## 数据、评论与备份
 
